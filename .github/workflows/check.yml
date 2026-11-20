@@ -1,0 +1,38 @@
+name: Check pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Use preinstalled Chrome
+        run: echo "CHROME=$(command -v google-chrome || command -v google-chrome-stable)" >> "$GITHUB_ENV"
+      - name: Check pages
+        run: node scripts/check-pages.mjs "$RUNNER_TEMP/pages" tools/*.html
+      - name: Check live behaviour
+        run: node scripts/check-live.mjs "$RUNNER_TEMP/live" tools/*.html
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: |
+            ${{ runner.temp }}/pages/*.png
+            ${{ runner.temp }}/live/*.png
+          retention-days: 7

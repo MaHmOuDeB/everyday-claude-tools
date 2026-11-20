@@ -51,7 +51,11 @@
     const options = { signal, modelTier: tier || "default" };
     if (images && images.length) options.images = images;
     if (onText) options.onText = onText;
-    return sample.json(prompt, options);
+    const value = await sample.json(prompt, options);
+    const filled = value && typeof value === "object" &&
+      Object.values(value).some((v) => v !== null && v !== undefined && v !== "" && !(Array.isArray(v) && !v.length));
+    if (!filled) throw { code: "empty_completion" };
+    return value;
   }
 
   async function ask(input, { images, signal, tier, onText, cache } = {}) {

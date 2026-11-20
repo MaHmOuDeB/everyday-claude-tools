@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Everyday Claude Tools</title>
+<meta name="description" content="Seven small, free tools for letters, contracts, dinner, phone calls, money and choices. Each opens on claude.ai and answers in 12 languages.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&display=swap">
+<link rel="stylesheet" href="tools/shared.css">
+<style>
+  .page { max-width: 60rem; gap: calc(var(--u) * 4); }
+  .how ol { margin: 0; padding-left: 1.3rem; display: flex; flex-direction: column; gap: 6px; }
+  .cards { display: grid; grid-template-columns: 1fr; gap: calc(var(--u) * 2); list-style: none; margin: 0; padding: 0; }
+  @media (min-width: 44rem) { .cards { grid-template-columns: 1fr 1fr; } }
+  .card { --c: var(--cl); border-top: 4px solid var(--c); }
+  .card h3 { display: flex; align-items: center; gap: 10px; }
+  .card h3::before { content: ""; width: 12px; height: 12px; border-radius: 50%; background: var(--c); flex: none; }
+  .card p { color: var(--ink-2); flex: 1; }
+  .card .row { margin-top: 4px; }
+  .card .btn.primary { background: var(--c); border-color: var(--c); color: #fff; }
+  .card .btn.secondary { border-color: var(--line); color: var(--ink); }
+  .card .btn { padding: 11px 18px; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .card { --c: var(--cd); }
+    :root:not([data-theme="light"]) .card .btn.primary { color: #0f1a17; }
+  }
+  :root[data-theme="dark"] .card { --c: var(--cd); }
+  :root[data-theme="dark"] .card .btn.primary { color: #0f1a17; }
+  .small { font-size: 0.95rem; color: var(--ink-2); }
+  footer { border-top: 1px solid var(--line); padding-top: calc(var(--u) * 2); }
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="mast">
+    <div class="suite">Everyday Claude Tools</div>
+    <h1>Small tools for everyday paperwork and life admin</h1>
+    <p class="lead">Seven free pages that help you read a letter, check a contract, plan dinner, prepare a call, look at your money and make a choice. Each answers in 12 languages.</p>
+  </header>
+
+  <section class="sheet how" aria-labelledby="how">
+    <h2 id="how">How it works</h2>
+    <ol>
+      <li>Open a tool on claude.ai while you are signed in.</li>
+      <li>Each answer uses your own Claude account. Nobody else pays or sees it.</li>
+      <li>The pages here work in Copy-as-prompt mode: they copy the request, and you paste it into any Claude chat.</li>
+    </ol>
+  </section>
+
+  <ul class="cards">
+    <li class="sheet card" style="--cl:#2554a8;--cd:#8fb0f0">
+      <h3>Letter Helper</h3>
+      <p>Paste or photograph an official letter. See what it wants, the deadline and a reply you can send.</p>
+      <div class="row"><a class="btn primary" href="https://claude.ai/artifact/4NSnkpZ2DPa4C8A2T23RC4">Open on Claude</a><a class="btn secondary" href="tools/letter-helper.html">Try without sign-in</a></div>
+    </li>
+    <li class="sheet card" style="--cl:#c2410c;--cd:#fb923c">
+      <h3>Fridge to Dinner</h3>
+      <p>Photograph your fridge or list what you have. Get three dinners that fit your time and diet, or a week plan.</p>
+      <div class="row"><a class="btn primary" href="https://claude.ai/artifact/Q8sAsbF1dKu9zhnAwh9tZq">Open on Claude</a><a class="btn secondary" href="tools/fridge-to-dinner.html">Try without sign-in</a></div>
+    </li>
+    <li class="sheet card" style="--cl:#a15c00;--cd:#f0b860">
+      <h3>Contract Checker</h3>
+      <p>Paste a phone, energy, gym or insurance contract. See what you really pay and the last day to cancel.</p>
+      <div class="row"><a class="btn primary" href="https://claude.ai/artifact/W8mR84o39nNjjfsjFGuXMU">Open on Claude</a><a class="btn secondary" href="tools/contract-checker.html">Try without sign-in</a></div>
+    </li>
+    <li class="sheet card" style="--cl:#0f6b66;--cd:#4fc3bc">
+      <h3>Call Prep</h3>
+      <p>Prepare a phone call in a language you are learning. Get your opening line, phrases and a practice call.</p>
+      <div class="row"><a class="btn primary" href="https://claude.ai/artifact/5D1Ne5u8qQSGsEqcJG2fVv">Open on Claude</a><a class="btn secondary" href="tools/call-prep.html">Try without sign-in</a></div>
+    </li>
+    <li class="sheet card" style="--cl:#1f7a4d;--cd:#5cc28c">
+      <h3>Money Snapshot</h3>
+      <p>Load a bank statement CSV. The page adds up money in and out and finds subscriptions. Claude sees only totals and the repeating payments you tick, and only if you ask.</p>
+      <div class="row"><a class="btn primary" href="https://claude.ai/artifact/L7GKDpCqrobhF7PjP7wYNZ">Open on Claude</a><a class="btn secondary" href="tools/money-snapshot.html">Try without sign-in</a></div>
+    </li>
+    <li class="sheet card" style="--cl:#6d3fc0;--cd:#b79af0">
+      <h3>Say It Simply</h3>
+      <p>Turn a hard text into plain words. Or write what you want to say and get a clear, polite message.</p>
+      <div class="row"><a class="btn primary" href="https://claude.ai/artifact/CiMY4Bog2yi1SgvQ64K9Wv">Open on Claude</a><a class="btn secondary" href="tools/say-it-simply.html">Try without sign-in</a></div>
+    </li>
+    <li class="sheet card" style="--cl:#3f45b5;--cd:#9ea3f0">
+      <h3>Decision Helper</h3>
+      <p>Stuck between two to four choices? Answer a few questions and see your options scored side by side.</p>
+      <div class="row"><a class="btn primary" href="https://claude.ai/artifact/EArZrcZmuguwKfB2251bWP">Open on Claude</a><a class="btn secondary" href="tools/decision-helper.html">Try without sign-in</a></div>
+    </li>
+  </ul>
+
+  <section class="sheet" aria-labelledby="priv">
+    <h2 id="priv">Privacy and limits</h2>
+    <p>Nothing is stored on a server by these pages. Your text and photos go to Claude on your own account, only when you press the button. Do not paste ID numbers, bank details or passwords.</p>
+    <p class="small">These tools explain and help you prepare. They are not legal, financial, medical or tax advice, and Claude can be wrong. Check anything important with a professional.</p>
+  </section>
+
+  <footer class="small">
+    <a href="https://github.com/MaHmOuDeB/everyday-claude-tools">Source on GitHub</a> · MIT licence
+  </footer>
+</main>
+</body>
+</html>

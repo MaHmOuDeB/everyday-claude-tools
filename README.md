@@ -4,6 +4,8 @@ Seven small, free tools for everyday paperwork and life admin. Each is one web p
 example, then put in your own letter, contract, fridge photo or question. Claude does the reading and explaining;
 the page does the dates and the maths.
 
+**Website:** https://mahmoudeb.github.io/everyday-claude-tools/
+
 They were made for people who live in a country whose language they are still learning, but they work for anyone.
 Every tool answers in 12 languages: English, German, French, Spanish, Italian, Portuguese, Turkish, Polish, Ukrainian,
 Russian, Arabic and Persian.

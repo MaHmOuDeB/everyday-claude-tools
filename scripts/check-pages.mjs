@@ -8,7 +8,7 @@ const [out, ...pages] = process.argv.slice(2);
 mkdirSync(out, { recursive: true });
 const chromePath = process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const port = 9400 + Math.floor(Math.random() * 400);
-const chrome = spawn(chromePath, ["--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${out}/.chrome`, "--no-first-run", "--hide-scrollbars", "about:blank"], { stdio: "ignore" });
+const chrome = spawn(chromePath, ["--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${out}/.chrome`, "--no-first-run", "--hide-scrollbars", ...(process.env.CI ? ["--no-sandbox"] : []), "about:blank"], { stdio: "ignore" });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let targets;
 for (let i = 0; i < 120 && !targets; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); } catch { await sleep(250); } }
