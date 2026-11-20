@@ -1,0 +1,343 @@
+<title>Fridge to Dinner</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Tell it what is in your fridge. Get three dinner ideas, or a week of dinners with one shopping list.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&display=swap">
+<link rel="stylesheet" href="shared.css">
+<style>
+  /* Fridge to Dinner: tomato red. White text on #c2410c is 5.2:1; dark text on the coral is above 8:1. */
+  :root { --accent: #c2410c; --accent-ink: #ffffff; --accent-soft: #fbe5da; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --accent: #ff9b7a; --accent-ink: #2b1007; --accent-soft: #3b2219; } }
+  :root[data-theme="dark"] { --accent: #ff9b7a; --accent-ink: #2b1007; --accent-soft: #3b2219; }
+  .chips:empty { display: none; }
+  .chip.item { cursor: default; padding-right: 8px; }
+  .chip button { padding: 0 6px; min-width: 24px; min-height: 24px; text-align: center; border-radius: 999px; }
+  .chip button:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+  .chip.first { border-color: var(--accent); background: var(--accent-soft); }
+  .recipe-head { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .recipe-head h3 { font-size: 1.3rem; flex: 1 1 14rem; min-width: 0; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .sub { font-weight: 700; font-size: 0.95rem; }
+  .shop-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 16px; }
+  .shop-grid > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .day-list { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 0; list-style: none; }
+  .day-list li { display: grid; grid-template-columns: 6.5rem 1fr; gap: 2px 16px; }
+  .day-list .d { font-weight: 700; }
+  .day-list .why { grid-column: 2; }
+  @media (max-width: 30rem) { .day-list li { grid-template-columns: 1fr; } .day-list .why { grid-column: 1; } }
+</style>
+
+<main class="page" id="main">
+  <header class="mast">
+    <p class="suite">Everyday Helpers</p>
+    <h1>Fridge to Dinner</h1>
+    <p class="lead">Tell it what is in your fridge. Get three dinner ideas, or a plan for the whole week with one shopping list.</p>
+  </header>
+
+  <form class="sheet accented" id="form" novalidate>
+    <div class="field">
+      <label for="have-input">What do you have?</label>
+      <div class="chips" id="have-chips" aria-live="polite"></div>
+      <input type="text" id="have-input" placeholder="Type an ingredient, then press Enter or comma" autocomplete="off" enterkeyhint="done">
+    </div>
+    <div class="field">
+      <label for="first-input">Use these first <span class="hint">(optional)</span></label>
+      <div class="chips" id="first-chips" aria-live="polite"></div>
+      <input type="text" id="first-input" placeholder="Things that will go off soon" autocomplete="off" enterkeyhint="done">
+    </div>
+    <div class="field">
+      <span class="label">Or add a photo of your fridge or shelf <span class="hint">(optional)</span></span>
+      <div class="drop" id="drop" tabindex="0" role="button" aria-describedby="drop-hint">Tap to add a photo, or drop it here</div>
+      <input type="file" id="photos" accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden>
+      <div class="thumbs" id="thumbs"></div>
+      <p class="hint" id="drop-hint">Up to 2 photos. Claude reads the food it can see. Check the answer and add what it missed.</p>
+    </div>
+    <div class="field">
+      <span class="label" id="time-label">How much time?</span>
+      <div class="chips" id="time" role="group" aria-labelledby="time-label"></div>
+    </div>
+    <div class="grid-2">
+      <div class="field">
+        <label for="servings">How many people?</label>
+        <input type="number" id="servings" min="1" max="12" step="1" value="2" inputmode="numeric">
+      </div>
+      <div class="field">
+        <label for="language">Answer in</label>
+        <select id="language"></select>
+      </div>
+    </div>
+    <div class="field">
+      <span class="label" id="diet-label">Diet <span class="hint">(pick any)</span></span>
+      <div class="chips" id="diet" role="group" aria-labelledby="diet-label"></div>
+    </div>
+    <div class="field">
+      <span class="label" id="equip-label">Kitchen <span class="hint">(pick what you can use)</span></span>
+      <div class="chips" id="equip" role="group" aria-labelledby="equip-label"></div>
+    </div>
+    <div class="field">
+      <span class="label" id="skill-label">How well do you cook?</span>
+      <div class="chips" id="skill" role="group" aria-labelledby="skill-label"></div>
+    </div>
+    <div class="row">
+      <button type="submit" class="btn primary" id="go">Suggest 3 recipes</button>
+      <button type="button" class="btn" id="week">Plan my week</button>
+    </div>
+    <p class="privacy">Your list and photos go to Claude on your own account only when you press a button. Nothing is saved on a server.</p>
+  </form>
+
+  <div id="status" role="status" aria-live="polite"></div>
+  <section class="results" id="results" aria-label="Dinner ideas"></section>
+  <p class="foot">Fridge to Dinner makes suggestions. It cannot know your allergies. Check every label and ingredient yourself, and follow your doctor's advice on food.</p>
+</main>
+
+<script src="shared.js"></script>
+<script>
+(() => {
+  const H = window.Helpers;
+  const $ = (id) => document.getElementById(id);
+  const getLanguage = H.languagePicker($("language"));
+  const photos = H.photoPicker($("drop"), $("photos"), $("thumbs"), 2);
+  let controller = null;
+  let live = false;
+
+  /* A list of removable chips with a text input: Enter or comma adds, x removes. */
+  function tagInput(listEl, inputEl, initial, cls = "") {
+    const items = [];
+    const draw = () => listEl.replaceChildren(...items.map((item, i) =>
+      H.el("span", { class: `chip item ${cls}`.trim() }, item,
+        H.el("button", { type: "button", "aria-label": `Remove ${item}`, text: "×", onclick: () => { items.splice(i, 1); draw(); inputEl.focus(); } }))));
+    const add = (raw) => {
+      for (const part of String(raw).split(/[,\n;]/)) {
+        const item = part.trim().replace(/\s+/g, " ").slice(0, 40);
+        if (item && items.length < 30 && !items.some((x) => x.toLowerCase() === item.toLowerCase())) items.push(item);
+      }
+      draw();
+    };
+    const commit = () => { if (inputEl.value.trim()) add(inputEl.value); inputEl.value = ""; };
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === ",") { e.preventDefault(); commit(); }
+      else if (e.key === "Backspace" && !inputEl.value && items.length) { items.pop(); draw(); }
+    });
+    inputEl.addEventListener("input", () => { if (/[,;]/.test(inputEl.value)) commit(); });
+    inputEl.addEventListener("blur", commit);
+    add(initial.join(","));
+    return { get: () => { commit(); return items.slice(); }, add };
+  }
+
+  /* A row of pressable chips. Single choice or multiple choice. */
+  function choice(box, options, { multi = false, selected = [] } = {}) {
+    const on = new Set(selected);
+    const buttons = options.map(([value, label]) => {
+      const b = H.el("button", { type: "button", class: "chip", "aria-pressed": String(on.has(value)), text: label });
+      b.addEventListener("click", () => {
+        if (multi) { if (on.has(value)) on.delete(value); else on.add(value); } else { on.clear(); on.add(value); }
+        for (const [v, btn] of buttons) btn.setAttribute("aria-pressed", String(on.has(v)));
+      });
+      return [value, b];
+    });
+    box.replaceChildren(...buttons.map(([, b]) => b));
+    return () => options.filter(([v]) => on.has(v)).map(([v]) => v);
+  }
+
+  const have = tagInput($("have-chips"), $("have-input"), ["eggs", "spinach", "feta", "rice", "onion", "tomatoes"]);
+  const first = tagInput($("first-chips"), $("first-input"), ["spinach"], "first");
+  const getTime = choice($("time"), [[15, "15 min"], [30, "30 min"], [45, "45 min"], [60, "60 min"]], { selected: [30] });
+  const getDiet = choice($("diet"), ["Vegetarian", "Vegan", "Halal", "No pork", "Gluten free", "Lactose free"].map((x) => [x, x]), { multi: true });
+  const getEquip = choice($("equip"), ["Stove", "Oven", "Microwave", "Air fryer"].map((x) => [x, x]), { multi: true, selected: ["Stove", "Oven"] });
+  const getSkill = choice($("skill"), [["beginner", "Beginner"], ["confident", "Confident"]], { selected: ["beginner"] });
+
+  const EXAMPLE_RECIPES = {
+    recipes: [
+      { name: "Spinach and feta omelette with tomato salad", minutes: 15, difficulty: "easy",
+        uses: ["eggs", "spinach", "feta", "tomatoes", "onion"], buy: [],
+        steps: ["Slice half an onion and 2 tomatoes. Mix the tomatoes with a little oil and salt for the salad.", "Fry the onion in a pan for 3 minutes. Add a big handful of spinach until it is soft.", "Beat 4 eggs with a pinch of salt. Pour them over the spinach.", "Crumble the feta on top. Cook on low heat for 4 minutes, then fold the omelette in half."],
+        tip: "Use a lid for the last minute. The top sets without you flipping anything." },
+      { name: "Tomato rice with spinach and feta", minutes: 30, difficulty: "easy",
+        uses: ["rice", "onion", "tomatoes", "spinach", "feta"], buy: ["vegetable stock cube"],
+        steps: ["Chop 1 onion and fry it in oil for 4 minutes.", "Add 1 cup of rice and 3 chopped tomatoes. Stir for 1 minute.", "Add 2 cups of hot water with the stock cube. Cover and cook on low heat for 15 minutes.", "Stir in the spinach for 2 minutes. Top with crumbled feta."],
+        tip: "Do not lift the lid while the rice cooks. Wait the full 15 minutes." },
+      { name: "Baked eggs in tomato sauce", minutes: 30, difficulty: "easy",
+        uses: ["eggs", "onion", "tomatoes", "feta", "spinach"], buy: ["bread"],
+        steps: ["Fry 1 chopped onion for 4 minutes. Add 4 chopped tomatoes and cook 10 minutes until thick.", "Stir in a handful of spinach.", "Make 4 small dips in the sauce. Crack an egg into each one. Cover and cook 6 to 8 minutes.", "Crumble feta on top and serve with bread."],
+        tip: "Take the pan off the heat while the whites are still a little wobbly. They keep cooking." },
+    ],
+  };
+
+  function buildPrompt(mode, s) {
+    const lines = [
+      "You are a practical home cook who helps people make dinner from what they already have. Be realistic and short.",
+      `Write names, steps and tips in ${s.language}, in short, plain sentences.`,
+      "",
+      `Ingredients I have: ${s.have.length ? s.have.join(", ") : "(none typed: use the photos)"}.`,
+      s.first.length ? `Use these first, they will go off soon: ${s.first.join(", ")}.` : null,
+      s.hasPhotos ? "The attached photos show my fridge or shelf. Add the food you can clearly see to my list. Ignore anything you cannot read or identify." : null,
+      `Cooking time: at most ${s.minutes} minutes in total. Servings: ${s.servings}.`,
+      s.diet.length ? `Diet rules, never break them: ${s.diet.join(", ").toLowerCase()}.` : "No diet rules.",
+      s.equipment.length ? `Kitchen: only ${s.equipment.join(", ").toLowerCase()}.` : "Kitchen: any normal equipment.",
+      `Cooking skill: ${s.skill}. ${s.skill === "beginner" ? "Use simple steps and no special techniques." : "Normal techniques are fine."}`,
+      "Assume I have salt, pepper, cooking oil and water.",
+      "",
+    ];
+    if (mode === "week") {
+      lines.push(
+        "Plan 5 dinners for Monday to Friday. Make the dinners share ingredients so little is wasted. Put the use-first items early in the week.",
+        "Each dinner must fit the time, servings, diet and kitchen above. Keep the shopping list short and group it by shop section (for example Fruit and vegetables, Dairy, Dry goods).",
+        "List only what I need to buy, not what I already have.",
+        "",
+        "Reply with only one JSON object in this shape:",
+        `{"days": [{"day": "Monday", "dinner": "name of the dish", "why": "one short sentence on why it fits"}],`,
+        ` "shopping": [{"section": "Fruit and vegetables", "items": ["item with amount"]}]}`);
+    } else {
+      lines.push(
+        "Suggest exactly 3 different dinners. Recipes that use the use-first items come first. Use mostly what I have.",
+        "In \"uses\" list only items from my list. In \"buy\" list only things I do not have, at most 4, or an empty list.",
+        "\"minutes\" is a number and must not be more than my time limit. \"difficulty\" is easy or medium.",
+        "Steps are short, numbered by order, with amounts for my number of servings.",
+        "",
+        "Reply with only one JSON object in this shape:",
+        `{"recipes": [{"name": "", "minutes": 0, "difficulty": "easy|medium", "uses": [""], "buy": [""], "steps": [""], "tip": "one short tip"}]}`);
+    }
+    return lines.filter((l) => l !== null).join("\n");
+  }
+
+  const arr = (x) => (Array.isArray(x) ? x.map((v) => (v === null || v === undefined ? "" : String(v).trim())).filter(Boolean) : []);
+  const same = (a, b) => { a = a.toLowerCase(); b = b.toLowerCase(); return a === b || a.includes(b) || b.includes(a); };
+
+  function recipeText(r) {
+    return [`${r.name} (${r.minutes ? r.minutes + " min" : "time not stated"}${r.difficulty ? ", " + r.difficulty : ""})`,
+      r.uses.length ? "Uses: " + r.uses.join(", ") : null, r.buy.length ? "To buy: " + r.buy.join(", ") : null,
+      "", ...r.steps.map((t, i) => `${i + 1}. ${t}`), r.tip ? "\nTip: " + r.tip : null].filter((l) => l !== null).join("\n");
+  }
+
+  function recipeCard(raw, firstItems, example) {
+    const r = {
+      name: String(raw?.name || "").trim(), minutes: Number(raw?.minutes) > 0 ? Math.round(Number(raw.minutes)) : 0,
+      difficulty: String(raw?.difficulty || "").trim(), uses: arr(raw?.uses), buy: arr(raw?.buy), steps: arr(raw?.steps), tip: String(raw?.tip || "").trim(),
+    };
+    if (!r.name) return null;
+    const copyButton = H.el("button", { type: "button", class: "btn small", text: "Copy recipe" });
+    copyButton.addEventListener("click", () => H.copy(recipeText(r), copyButton));
+    return H.el("section", { class: "sheet" },
+      H.el("div", { class: "recipe-head" }, H.el("h3", { dir: "auto", text: r.name }), example ? H.el("span", { class: "tag example", text: "Example" }) : null),
+      H.el("div", { class: "meta" },
+        r.minutes ? H.el("span", { class: "tag", text: `${r.minutes} min` }) : null,
+        r.difficulty ? H.el("span", { class: "tag", text: r.difficulty }) : null,
+        r.buy.length ? H.el("span", { class: "tag warn", text: `Buy: ${r.buy.length} thing${r.buy.length === 1 ? "" : "s"}` }) : H.el("span", { class: "tag ok", text: "Nothing to buy" })),
+      r.uses.length ? H.el("div", { class: "field" }, H.el("span", { class: "sub", text: "From your list" }),
+        H.el("div", { class: "chips", dir: "auto" }, r.uses.map((u) => H.el("span", { class: `chip item ${firstItems.some((f) => same(u, f)) ? "first" : ""}`.trim(), text: u })))) : null,
+      r.buy.length ? H.el("div", { class: "field" }, H.el("span", { class: "sub", text: "To buy" }),
+        H.el("ul", { class: "plain-list", dir: "auto" }, r.buy.map((b) => H.el("li", { text: b })))) : null,
+      r.steps.length ? H.el("div", { class: "field" }, H.el("span", { class: "sub", text: "Steps" }),
+        H.el("ol", { class: "steps", dir: "auto" }, r.steps.map((t) => H.el("li", { text: t })))) : null,
+      r.tip ? H.el("p", { class: "notice", dir: "auto", text: "Tip: " + r.tip }) : null,
+      H.el("div", { class: "row" }, copyButton));
+  }
+
+  function renderRecipes(data, { example = false, firstItems = [] } = {}) {
+    const cards = (Array.isArray(data?.recipes) ? data.recipes : []).slice(0, 3).map((r) => recipeCard(r, firstItems, example)).filter(Boolean);
+    if (!cards.length) throw { code: "invalid_json" };
+    $("results").replaceChildren(...cards);
+  }
+
+  function weekText(days, shopping) {
+    const out = ["Dinners"];
+    for (const d of days) out.push(`${d.day}: ${d.dinner}`);
+    if (shopping.length) {
+      out.push("", "Shopping list");
+      for (const s of shopping) out.push("", s.section, ...s.items.map((i) => "- " + i));
+    }
+    return out.join("\n");
+  }
+
+  function renderWeek(data) {
+    const days = (Array.isArray(data?.days) ? data.days : []).map((d) => ({ day: String(d?.day || "").trim(), dinner: String(d?.dinner || "").trim(), why: String(d?.why || "").trim() })).filter((d) => d.dinner).slice(0, 7);
+    const shopping = (Array.isArray(data?.shopping) ? data.shopping : []).map((s) => ({ section: String(s?.section || "").trim() || "Other", items: arr(s?.items) })).filter((s) => s.items.length);
+    if (!days.length) throw { code: "invalid_json" };
+    const copyButton = H.el("button", { type: "button", class: "btn small", text: "Copy plan and list" });
+    copyButton.addEventListener("click", () => H.copy(weekText(days, shopping), copyButton));
+    const out = [H.el("section", { class: "sheet" },
+      H.el("h2", { text: "Your week" }),
+      H.el("ul", { class: "day-list", dir: "auto" }, days.map((d) => H.el("li", {},
+        H.el("span", { class: "d", text: d.day || "Day" }), H.el("span", { text: d.dinner }), d.why ? H.el("span", { class: "hint why", text: d.why }) : null))),
+      shopping.length ? null : H.el("div", { class: "row" }, copyButton))];
+    if (shopping.length) {
+      out.push(H.el("section", { class: "sheet" },
+        H.el("h2", { text: "Shopping list" }),
+        H.el("div", { class: "shop-grid", dir: "auto" }, shopping.map((s) => H.el("div", {}, H.el("h3", { text: s.section }), H.el("ul", { class: "plain-list" }, s.items.map((i) => H.el("li", { text: i })))))),
+        H.el("div", { class: "row" }, copyButton)));
+    }
+    $("results").replaceChildren(...out);
+  }
+
+  function state() {
+    const images = photos.files();
+    const servings = Math.min(12, Math.max(1, Math.round(Number($("servings").value)) || 2));
+    return {
+      have: have.get(), first: first.get(), minutes: getTime()[0] || 30, servings, diet: getDiet(), equipment: getEquip(),
+      skill: getSkill()[0] || "beginner", language: getLanguage(), images, hasPhotos: images.length > 0,
+    };
+  }
+
+  function say(message, kind = "") {
+    $("status").replaceChildren(message ? H.el("p", { class: kind === "thinking" ? "thinking" : `notice ${kind}`, text: message }) : "");
+  }
+
+  function check(s) {
+    if (!s.have.length && !s.hasPhotos) { say("Add at least one ingredient or a photo first.", "warn"); return false; }
+    return true;
+  }
+
+  function busy(on) {
+    $("go").disabled = on;
+    $("week").disabled = on;
+    $("results").toggleAttribute("aria-busy", on);
+  }
+
+  async function run(mode) {
+    const s = state();
+    if (!check(s)) return;
+    controller?.abort();
+    controller = new AbortController();
+    busy(true);
+    say(mode === "week" ? "Planning your week. This usually takes 15 to 40 seconds." : "Looking for dinner ideas. This usually takes 10 to 30 seconds.", "thinking");
+    try {
+      const data = await H.askJSON(buildPrompt(mode, s), { images: s.images, signal: controller.signal });
+      if (!data || typeof data !== "object") throw { code: "invalid_json" };
+      if (mode === "week") renderWeek(data); else renderRecipes(data, { firstItems: s.first });
+      say("");
+      $("results").querySelector("h2, h3")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (error) {
+      if (error?.code !== "cancelled") say(H.errorText(error), "danger");
+      live = await H.live();
+      if (!live) setCopyLabels();
+    } finally {
+      busy(false);
+    }
+  }
+
+  function showPrompt(mode) {
+    const s = state();
+    if (!check(s)) return;
+    const note = s.hasPhotos ? "This copy of the page cannot reach Claude directly. Copy the prompt, open a new chat on claude.ai, paste it and attach your photos there." : undefined;
+    say("");
+    $("results").replaceChildren(H.promptPanel(buildPrompt(mode, s), note));
+  }
+
+  function setCopyLabels() {
+    $("go").textContent = "Copy as prompt";
+    $("week").textContent = "Copy week prompt";
+  }
+
+  $("form").addEventListener("submit", (e) => e.preventDefault());
+  $("week").addEventListener("click", async () => { if (await H.live()) run("week"); else showPrompt("week"); });
+  H.wireMainButton({ button: $("go"), liveLabel: "Suggest 3 recipes", onLive: () => run("recipes"), onCopy: () => showPrompt("recipes") }).then(async (isLive) => {
+    live = isLive;
+    if (!isLive) { setCopyLabels(); $("drop").title = "Photos work in the live version on claude.ai"; }
+    const limits = await H.imageLimits();
+    if (limits) photos.setMax(Math.min(2, limits.maxCount || 2));
+  });
+
+  renderRecipes(EXAMPLE_RECIPES, { example: true, firstItems: ["spinach"] });
+})();
+</script>

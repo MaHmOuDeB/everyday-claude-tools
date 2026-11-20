@@ -1,0 +1,305 @@
+<title>Letter Helper</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Understand an official letter: what it says, what to do, the deadline and a draft reply.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&display=swap">
+<link rel="stylesheet" href="shared.css">
+<style>
+  /* Letter Helper: ink blue, the colour of a signature on an official form. */
+  :root { --accent: #2554a8; --accent-ink: #ffffff; --accent-soft: #e2e9f6; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --accent: #8fb0f0; --accent-ink: #0f1a17; --accent-soft: #1c2840; } }
+  :root[data-theme="dark"] { --accent: #8fb0f0; --accent-ink: #0f1a17; --accent-soft: #1c2840; }
+  .urgency { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .deadline { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; }
+  .deadline .when { font: 700 1.6rem/1.2 var(--font-display); font-variant-numeric: tabular-nums; }
+  .reply-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 16px; }
+  .reply-pair > div { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .tabs { display: flex; gap: 8px; }
+</style>
+
+<main class="page" id="main">
+  <header class="mast">
+    <p class="suite">Everyday Helpers</p>
+    <h1>Letter Helper</h1>
+    <p class="lead">Got a letter from an office, your landlord or your insurance? Find out what it says, what you have to do and by when.</p>
+  </header>
+
+  <form class="sheet accented" id="form" novalidate>
+    <div class="tabs" role="group" aria-label="How to add the letter">
+      <button type="button" class="chip on" aria-pressed="true" data-tab="text">Paste the text</button>
+      <button type="button" class="chip" aria-pressed="false" data-tab="photo" id="photo-tab">Add photos</button>
+    </div>
+    <div class="field" data-panel="text">
+      <label for="letter">The letter</label>
+      <textarea id="letter" rows="10" placeholder="Paste the whole letter here, including the date and the sender."></textarea>
+    </div>
+    <div class="field" data-panel="photo" hidden>
+      <span class="label">Photos of the pages</span>
+      <div class="drop" id="drop" tabindex="0" role="button" aria-describedby="drop-hint">Tap to add photos, or drop them here</div>
+      <input type="file" id="photos" accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden>
+      <div class="thumbs" id="thumbs"></div>
+      <p class="hint" id="drop-hint">Up to 4 pages. Cover account numbers and ID numbers before you take the photo.</p>
+    </div>
+    <div class="grid-2">
+      <div class="field">
+        <label for="country">Where the letter is from</label>
+        <input type="text" id="country" value="Germany" autocomplete="country-name">
+      </div>
+      <div class="field">
+        <label for="language">Explain it in</label>
+        <select id="language"></select>
+      </div>
+    </div>
+    <div class="row">
+      <button type="submit" class="btn primary" id="go">Explain my letter</button>
+    </div>
+    <p class="privacy">Your letter goes to Claude on your own account only when you press the button. Nothing is saved on a server.</p>
+  </form>
+
+  <div id="status" role="status" aria-live="polite"></div>
+  <section class="results" id="results" aria-label="Explanation"></section>
+  <p class="foot">Letter Helper explains letters. It cannot give legal advice. For a court letter, a large sum or a deadline you cannot meet, get help from a lawyer or a consumer advice centre.</p>
+</main>
+
+<script src="shared.js"></script>
+<script>
+(() => {
+  const H = window.Helpers;
+  const $ = (id) => document.getElementById(id);
+  const getLanguage = H.languagePicker($("language"));
+  const photos = H.photoPicker($("drop"), $("photos"), $("thumbs"), 4);
+  let tab = "text";
+  let controller = null;
+
+  const shift = (days) => { const d = new Date(); d.setDate(d.getDate() + days); return d; };
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const german = (d) => d.toLocaleDateString("de-DE", { day: "numeric", month: "long", year: "numeric" });
+  const english = (d) => d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  const sent = shift(-10), due = shift(4);
+  const before = new Date(sent.getFullYear(), sent.getMonth() - 1, 1);
+  const deMonth = before.toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+  const enMonth = before.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+  const enName = before.toLocaleDateString("en-GB", { month: "long" });
+  const EXAMPLE_LETTER = `Stadtwerke Musterstadt GmbH · Kundenservice · Am Wasserturm 4 · 12345 Musterstadt
+
+Musterstadt, ${german(sent)}
+Kundennummer: 4471-0093
+
+Zahlungserinnerung
+
+Sehr geehrte Kundin, sehr geehrter Kunde,
+
+bei der Durchsicht unserer Konten haben wir festgestellt, dass der Abschlag für Strom für den Monat ${deMonth} in Höhe von 68,00 EUR noch nicht bei uns eingegangen ist.
+
+Bitte überweisen Sie den offenen Betrag bis zum ${german(due)} auf das unten genannte Konto. Geben Sie dabei bitte Ihre Kundennummer als Verwendungszweck an.
+
+Sollte der Betrag nicht fristgerecht eingehen, sind wir gezwungen, eine Mahngebühr von 5,00 EUR zu erheben. Sollten Sie die Zahlung bereits veranlasst haben, betrachten Sie dieses Schreiben bitte als gegenstandslos.
+
+Mit freundlichen Grüßen
+Ihr Kundenservice`;
+
+  const EXAMPLE_RESULT = {
+    summary: `Your energy company says your electricity payment for ${enName} (68.00 EUR) has not arrived, and asks you to pay it by ${english(due)}.`,
+    sender: "Stadtwerke Musterstadt, your local energy company",
+    kind: "reminder",
+    urgency: "soon",
+    steps: [
+      { text: `Check your bank account: did the 68.00 EUR for ${enName} leave your account?`, deadline: null },
+      { text: "If not, transfer 68.00 EUR to the account at the bottom of the letter, with your customer number 4471-0093 as the reference.", deadline: iso(due) },
+      { text: "If you already paid, you can ignore the letter. Keep your bank statement in case they ask.", deadline: null },
+    ],
+    deadline: { date: iso(due), what: "Pay 68.00 EUR" },
+    money: [{ amount: "68.00 EUR", for: `Monthly electricity instalment (Abschlag) for ${enMonth}`, how: "Bank transfer with customer number 4471-0093 as the reference" }],
+    if_ignored: "They will add a reminder fee of 5.00 EUR. If you still do not pay, more reminders and costs usually follow.",
+    documents: [`Your bank statement for ${enName}`, "Your customer number: 4471-0093"],
+    terms: [
+      { term: "Zahlungserinnerung", meaning: "Payment reminder: a friendly first notice that money is missing." },
+      { term: "Abschlag", meaning: "A fixed monthly advance payment for electricity, settled once a year." },
+      { term: "Mahngebühr", meaning: "A fee for sending a formal payment reminder." },
+      { term: "gegenstandslos", meaning: "No longer relevant: ignore this letter if you already paid." },
+    ],
+    looks_genuine: "yes",
+    scam_signs: [],
+    reply: {
+      needed: false,
+      letter_language: "German",
+      original: `Sehr geehrte Damen und Herren,\n\nich habe den Abschlag für ${deMonth} in Höhe von 68,00 EUR am [Datum] überwiesen. Ein Kontoauszug liegt bei.\n\nMit freundlichen Grüßen\n[Ihr Name]\nKundennummer 4471-0093`,
+      translation: `Dear Sir or Madam,\n\nI transferred the ${enMonth} instalment of 68.00 EUR on [date]. A bank statement is attached.\n\nKind regards\n[Your name]\nCustomer number 4471-0093`,
+    },
+    get_help: "If the amount is wrong, call the customer service number on the letter before the deadline.",
+  };
+
+  function buildPrompt({ text, country, language, hasPhotos }) {
+    return [
+      "You help a person understand an official letter they received. Be accurate, calm and practical.",
+      `Today's date is ${H.todayISO()}. The letter comes from: ${country || "unknown country"}.`,
+      `Write every explanation in ${language}, in short, plain sentences a non-expert can follow.`,
+      "Keep quoted terms, amounts and names exactly as written in the letter.",
+      "If the letter gives a period instead of a date (for example 'within 14 days of this letter'), work out the date from the letter's date.",
+      "Never invent a deadline, amount or consequence the letter does not support; say 'not stated' instead.",
+      "Point out scam warning signs only if they are really there (payment by gift cards or crypto, pressure to act within hours, a sender that does not match, links to unknown sites).",
+      "",
+      "Reply with only one JSON object in this shape:",
+      `{"summary": "one sentence", "sender": "who sent it", "kind": "bill|reminder|decision|request|appointment|information|other",`,
+      ` "urgency": "now|soon|info", "steps": [{"text": "one action", "deadline": "YYYY-MM-DD or null"}],`,
+      ` "deadline": {"date": "YYYY-MM-DD or null", "what": "what is due"},`,
+      ` "money": [{"amount": "", "for": "", "how": ""}], "if_ignored": "", "documents": [""],`,
+      ` "terms": [{"term": "word from the letter", "meaning": "plain meaning"}],`,
+      ` "looks_genuine": "yes|unsure|no", "scam_signs": [""],`,
+      ` "reply": {"needed": true, "letter_language": "", "original": "a short reply in the letter's language, with [placeholders] for personal details", "translation": "the same reply in ${language}"},`,
+      ` "get_help": "one sentence on when and where to get real help"}`,
+      "",
+      hasPhotos ? "The letter is in the attached photos." : "The letter:",
+      hasPhotos ? (text ? "Extra text the person added:\n" + text : "") : text,
+    ].join("\n");
+  }
+
+  const KIND = { bill: "Bill", reminder: "Payment reminder", decision: "Decision", request: "Request for something", appointment: "Appointment", information: "Information", other: "Letter" };
+  const URGENCY = { now: ["Act now", "danger"], soon: ["Act soon", "warn"], info: ["For your information", "ok"] };
+  const GENUINE = { yes: ["Looks genuine", "ok"], unsure: ["Check it is real", "warn"], no: ["Looks like a scam", "danger"] };
+
+  function section(title, ...children) {
+    return H.el("section", { class: "sheet" }, H.el("h2", { text: title }), ...children);
+  }
+  const list = (items, cls = "plain-list") => H.el("ul", { class: cls, dir: "auto" }, items.map((t) => H.el("li", { text: t })));
+  const filled = (arr) => Array.isArray(arr) ? arr.filter((x) => x && (typeof x === "string" ? x.trim() : true)) : [];
+
+  function render(data, { example = false } = {}) {
+    const out = [];
+    const [urgencyText, urgencyKind] = URGENCY[data.urgency] || URGENCY.info;
+    const [genuineText, genuineKind] = GENUINE[data.looks_genuine] || GENUINE.unsure;
+    out.push(H.el("section", { class: "sheet accented" },
+      H.el("div", { class: "urgency" },
+        example ? H.el("span", { class: "tag example", text: "Example" }) : null,
+        H.el("span", { class: `tag ${urgencyKind}`, text: urgencyText }),
+        H.el("span", { class: "tag", text: KIND[data.kind] || KIND.other }),
+        H.el("span", { class: `tag ${genuineKind}`, text: genuineText })),
+      H.el("p", { class: "big-line", dir: "auto", text: data.summary || "" }),
+      data.sender ? H.el("p", { class: "hint", dir: "auto", text: "From: " + data.sender }) : null));
+
+    const date = data.deadline?.date;
+    if (date && H.parseISO(date)) {
+      const days = H.daysUntil(date);
+      const remind = H.el("button", { type: "button", class: "btn small", text: "Add to calendar" });
+      remind.addEventListener("click", async () => {
+        try {
+          const status = await H.saveFile("letter-deadline.ics", H.ics({ title: data.deadline.what || "Letter deadline", date, description: data.summary || "" }), "text/calendar");
+          remind.textContent = status === "saved" ? "Saved" : "Sent";
+        } catch { remind.textContent = "Could not save"; }
+      });
+      out.push(section("Deadline",
+        H.el("div", { class: "deadline" },
+          H.el("span", { class: "when", text: H.longDate(date) }),
+          H.el("span", { class: `tag ${days !== null && days < 0 ? "danger" : days !== null && days <= 7 ? "warn" : "ok"}`, text: H.daysText(days) })),
+        data.deadline.what ? H.el("p", { dir: "auto", text: data.deadline.what }) : null,
+        example ? null : H.el("div", { class: "row" }, remind)));
+    }
+
+    const steps = filled(data.steps);
+    if (steps.length) {
+      out.push(section("What to do", H.el("ol", { class: "steps", dir: "auto" }, steps.map((s) =>
+        H.el("li", {}, s.text || String(s), s.deadline && H.parseISO(s.deadline) ? H.el("span", { class: "hint", text: ` · by ${H.longDate(s.deadline)}` }) : null)))));
+    }
+
+    const money = filled(data.money);
+    if (money.length) {
+      out.push(section("Money", ...money.map((m) => H.el("dl", { class: "kv", dir: "auto" },
+        H.el("dt", { text: "Amount" }), H.el("dd", { class: "num", text: m.amount || "not stated" }),
+        H.el("dt", { text: "For" }), H.el("dd", { text: m.for || "not stated" }),
+        H.el("dt", { text: "How to pay" }), H.el("dd", { text: m.how || "not stated" })))));
+    }
+
+    if (data.if_ignored) out.push(section("If you do nothing", H.el("p", { dir: "auto", text: data.if_ignored })));
+    const docs = filled(data.documents);
+    if (docs.length) out.push(section("Have these ready", list(docs)));
+    const terms = filled(data.terms);
+    if (terms.length) {
+      out.push(section("Words explained", H.el("dl", { class: "kv", dir: "auto" },
+        terms.flatMap((t) => [H.el("dt", { text: t.term || "" }), H.el("dd", { text: t.meaning || "" })]))));
+    }
+    const scam = filled(data.scam_signs);
+    if (scam.length) out.push(section("Warning signs", H.el("p", { class: "notice danger", text: "Do not pay or click anything until you have checked the sender yourself, using contact details you find independently." }), list(scam)));
+
+    const reply = data.reply;
+    if (reply && (reply.original || reply.translation)) {
+      const block = (label, text, lang) => {
+        const copyButton = H.el("button", { type: "button", class: "btn small", text: "Copy" });
+        copyButton.addEventListener("click", () => H.copy(text, copyButton));
+        return H.el("div", {}, H.el("h3", { text: label }), H.el("div", { class: "quote", dir: "auto", lang: lang || null, text }), H.el("div", { class: "row" }, copyButton));
+      };
+      out.push(section(reply.needed ? "Draft reply" : "If you need to reply",
+        H.el("p", { class: "hint", text: "Fill in the parts in [brackets] before you send it." }),
+        H.el("div", { class: "reply-pair" },
+          reply.original ? block(`To send (${reply.letter_language || "letter's language"})`, reply.original) : null,
+          reply.translation ? block("What it says", reply.translation) : null)));
+    }
+    if (data.get_help) out.push(H.el("p", { class: "notice", dir: "auto", text: data.get_help }));
+    $("results").replaceChildren(...out);
+  }
+
+  function setTab(next) {
+    tab = next;
+    for (const b of document.querySelectorAll("[data-tab]")) {
+      const on = b.dataset.tab === next;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-pressed", String(on));
+    }
+    for (const p of document.querySelectorAll("[data-panel]")) p.hidden = p.dataset.panel !== next;
+  }
+  for (const b of document.querySelectorAll("[data-tab]")) b.addEventListener("click", () => setTab(b.dataset.tab));
+
+  function state() {
+    const images = tab === "photo" ? photos.files() : [];
+    return { text: $("letter").value.trim(), country: $("country").value.trim(), language: getLanguage(), images, hasPhotos: images.length > 0 };
+  }
+
+  function say(message, kind = "") {
+    $("status").replaceChildren(message ? H.el("p", { class: kind === "thinking" ? "thinking" : `notice ${kind}`, text: message }) : "");
+  }
+
+  async function explain() {
+    const s = state();
+    if (!s.text && !s.hasPhotos) { say("Paste the letter or add a photo first.", "warn"); return; }
+    controller?.abort();
+    controller = new AbortController();
+    const go = $("go");
+    go.disabled = true;
+    $("results").setAttribute("aria-busy", "true");
+    say("Reading your letter. This usually takes 10 to 40 seconds.", "thinking");
+    try {
+      const data = await H.askJSON(buildPrompt(s), { images: s.images, signal: controller.signal });
+      if (!data || typeof data !== "object") throw { code: "invalid_json" };
+      render(data);
+      say("");
+      $("results").querySelector("h2, .big-line")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (error) {
+      if (error?.code !== "cancelled") say(H.errorText(error), "danger");
+      if (!(await H.live())) go.textContent = "Copy as prompt";
+    } finally {
+      go.disabled = false;
+      $("results").removeAttribute("aria-busy");
+    }
+  }
+
+  function showPrompt() {
+    const s = state();
+    if (!s.text && !s.hasPhotos) { say("Paste the letter first. Then the prompt includes it.", "warn"); return; }
+    const note = s.hasPhotos
+      ? "This copy of the page cannot reach Claude directly. Copy the prompt, open a new chat on claude.ai, paste it and attach your photos there."
+      : undefined;
+    say("");
+    $("results").replaceChildren(H.promptPanel(buildPrompt(s), note));
+  }
+
+  $("form").addEventListener("submit", (e) => e.preventDefault());
+  H.wireMainButton({ button: $("go"), liveLabel: "Explain my letter", onLive: explain, onCopy: showPrompt }).then(async (isLive) => {
+    if (!isLive) $("photo-tab").title = "Photos work in the live version on claude.ai";
+    const limits = await H.imageLimits();
+    if (limits) photos.setMax(Math.min(4, limits.maxCount || 4));
+  });
+
+  $("letter").value = EXAMPLE_LETTER;
+  render(EXAMPLE_RESULT, { example: true });
+})();
+</script>

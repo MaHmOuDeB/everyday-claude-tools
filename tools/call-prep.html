@@ -1,0 +1,404 @@
+<title>Call Prep</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Get ready for a phone call in a language you are still learning: a script, useful phrases, and a practice call.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&display=swap">
+<link rel="stylesheet" href="shared.css">
+<style>
+  /* Call Prep: teal, the colour of a phone line that is open. */
+  :root { --accent: #0f6b66; --accent-ink: #ffffff; --accent-soft: #d9efec; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --accent: #5fd0c5; --accent-ink: #0b1f1d; --accent-soft: #15302e; } }
+  :root[data-theme="dark"] { --accent: #5fd0c5; --accent-ink: #0b1f1d; --accent-soft: #15302e; }
+  .tags { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .dialogue { display: flex; flex-direction: column; gap: 12px; }
+  .turn { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 14px; width: min(100%, 34rem); min-width: 0; overflow-wrap: anywhere; }
+  .turn.you { align-self: flex-end; background: var(--accent-soft); border: 1.5px solid var(--accent); }
+  .turn.them { align-self: flex-start; background: var(--paper); border: 1px solid var(--line); }
+  .turn .who { font-size: 0.8rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--ink-2); }
+  .turn .line { font-size: 1.05rem; font-weight: 700; margin: 0; }
+  .turn.them .line { font-weight: 400; }
+  .turn .trans { margin: 0; color: var(--ink-2); font-size: 0.95rem; }
+  .turn .row { gap: 8px; }
+  .no-tts .hear { display: none; }
+  .phrase { display: flex; flex-direction: column; gap: 4px; padding: 10px 0; border-top: 1px solid var(--line); }
+  .phrase:first-child { border-top: 0; padding-top: 0; }
+  .practice-log { display: flex; flex-direction: column; gap: 12px; }
+  .practice-send { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+  .practice-send textarea { flex: 1 1 14rem; min-height: 3rem; }
+</style>
+
+<main class="page no-tts" id="main">
+  <header class="mast">
+    <p class="suite">Everyday Helpers</p>
+    <h1>Call Prep</h1>
+    <p class="lead">A phone call in a language you are still learning is hard. Get your opening line, a script, phrases for when you are lost, and a practice call.</p>
+  </header>
+
+  <form class="sheet accented" id="form" novalidate>
+    <div class="field">
+      <label for="goal">What do you need from the call?</label>
+      <textarea id="goal" rows="2" placeholder="For example: I want to book a check-up for next month."></textarea>
+    </div>
+    <div class="field">
+      <span class="label" id="who-label">Who are you calling?</span>
+      <div class="chips" id="who" role="group" aria-labelledby="who-label"></div>
+    </div>
+    <div class="grid-2">
+      <div class="field">
+        <label for="call-language">Call language</label>
+        <select id="call-language"></select>
+      </div>
+      <div class="field">
+        <label for="language">Show translations in</label>
+        <select id="language"></select>
+      </div>
+    </div>
+    <div class="field">
+      <span class="label" id="level-label">Your level in the call language</span>
+      <div class="chips" id="level" role="group" aria-labelledby="level-label"></div>
+    </div>
+    <div class="row">
+      <button type="submit" class="btn primary" id="go">Prepare my call</button>
+    </div>
+    <p class="privacy">What you write goes to Claude on your own account only when you press the button. Do not type ID numbers or bank details. Nothing is saved on a server.</p>
+  </form>
+
+  <div id="status" role="status" aria-live="polite"></div>
+  <section class="results" id="results" aria-label="Call preparation"></section>
+
+  <section class="sheet" id="practice" aria-label="Practise the call">
+    <h2>Practise the call</h2>
+    <p class="hint" id="practice-note">Claude plays the other side of the call. Write your lines and get answers at your level. At the end you get three kind tips.</p>
+    <div class="row">
+      <button type="button" class="btn primary small" id="practice-start">Start the practice call</button>
+      <button type="button" class="btn small" id="practice-reset" hidden>Start again</button>
+    </div>
+    <div class="practice-log" id="practice-log" aria-live="polite"></div>
+    <div class="field" id="practice-reply" hidden>
+      <label for="practice-input">Your line</label>
+      <div class="practice-send">
+        <textarea id="practice-input" rows="2" lang="de" placeholder="Write what you would say."></textarea>
+        <button type="button" class="btn primary small" id="practice-send">Send</button>
+      </div>
+    </div>
+    <div id="practice-status" role="status" aria-live="polite"></div>
+  </section>
+
+  <p class="foot">Call Prep is a practice aid. Scripts are likely lines, not what the other person will really say. If the call is about a legal, health or money matter, ask someone you trust to join you.</p>
+</main>
+
+<script src="shared.js"></script>
+<script>
+(() => {
+  const H = window.Helpers;
+  const $ = (id) => document.getElementById(id);
+  const getLanguage = H.languagePicker($("language"));
+  let controller = null;
+
+  const WHO = [["doctor", "Doctor's office"], ["landlord", "Landlord"], ["job centre", "Job centre"], ["school", "School"], ["insurance", "Insurance"], ["other", "Other"]];
+  const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
+  const CALL_LANGS = [["German", "Deutsch (German)", "de-DE"], ["English", "English", "en-GB"], ["French", "Français (French)", "fr-FR"], ["Spanish", "Español (Spanish)", "es-ES"], ["Italian", "Italiano (Italian)", "it-IT"], ["Dutch", "Nederlands (Dutch)", "nl-NL"], ["Polish", "Polski (Polish)", "pl-PL"], ["Turkish", "Türkçe (Turkish)", "tr-TR"]];
+  const WHO_TEXT = { "doctor": "a doctor's office", "landlord": "a landlord", "job centre": "a job centre", "school": "a school", "insurance": "an insurance company", "other": "an organisation" };
+  const bcp47 = (name) => (CALL_LANGS.find((l) => l[0] === name) || CALL_LANGS[0])[2];
+
+  $("call-language").replaceChildren(...CALL_LANGS.map(([value, shown]) => H.el("option", { value, text: shown })));
+  $("call-language").value = "German";
+  let who = "doctor";
+  let level = "B1";
+
+  function chipGroup(box, items, get, set) {
+    const draw = () => box.replaceChildren(...items.map(([value, label]) => {
+      const on = get() === value;
+      return H.el("button", { type: "button", class: "chip" + (on ? " on" : ""), "aria-pressed": String(on), text: label, onclick: () => { set(value); draw(); } });
+    }));
+    draw();
+  }
+  chipGroup($("who"), WHO, () => who, (v) => { who = v; });
+  chipGroup($("level"), LEVELS.map((l) => [l, l]), () => level, (v) => { level = v; });
+
+  // ---- Example (computed once, German call to a fictional practice) ----
+  const EXAMPLE_GOAL = "I want to book a check-up (Vorsorgeuntersuchung) for next month.";
+  const EXAMPLE_RESULT = {
+    have_ready: ["Your full name and date of birth", "Your health insurance card (and the insurer's name)", "The dates and times next month when you are free", "Your phone number, in case the line drops"],
+    opening: { line: "Guten Tag, hier spricht [Ihr Name]. Ich möchte gern einen Termin für eine Vorsorgeuntersuchung machen.", translation: "Good day, this is [your name]. I would like to make an appointment for a check-up." },
+    script: [
+      { who: "them", line: "Praxis Dr. Beispiel, guten Tag.", translation: "Dr. Beispiel's practice, good day." },
+      { who: "you", line: "Guten Tag, hier spricht [Ihr Name]. Ich möchte gern einen Termin für eine Vorsorgeuntersuchung machen.", translation: "Good day, this is [your name]. I would like to make an appointment for a check-up." },
+      { who: "them", line: "Waren Sie schon einmal bei uns in der Praxis?", translation: "Have you been to our practice before?" },
+      { who: "you", line: "Nein, ich bin neu hier. Ich bin gesetzlich versichert.", translation: "No, I am new here. I have public health insurance." },
+      { who: "them", line: "Gut. Wie wäre es mit dem Dienstag, 14 Uhr?", translation: "Good. How about Tuesday at 2 pm?" },
+      { who: "you", line: "Ja, Dienstag um 14 Uhr passt mir gut.", translation: "Yes, Tuesday at 2 pm suits me well." },
+      { who: "them", line: "Bitte bringen Sie Ihre Versichertenkarte mit. Wie ist Ihr Geburtsdatum?", translation: "Please bring your insurance card. What is your date of birth?" },
+      { who: "you", line: "Mein Geburtsdatum ist der [Tag]. [Monat] [Jahr].", translation: "My date of birth is the [day] [month] [year]." },
+    ],
+    if_stuck: [
+      { line: "Könnten Sie das bitte wiederholen?", translation: "Could you please repeat that?" },
+      { line: "Könnten Sie bitte etwas langsamer sprechen?", translation: "Could you please speak a bit more slowly?" },
+      { line: "Ich spreche nur ein bisschen Deutsch.", translation: "I only speak a little German." },
+      { line: "Können Sie das bitte buchstabieren?", translation: "Can you spell that, please?" },
+    ],
+    ending: { line: "Vielen Dank, dann sehen wir uns am Dienstag. Auf Wiederhören!", translation: "Thank you very much, then we will see each other on Tuesday. Goodbye!" },
+    words: [
+      { word: "der Termin", meaning: "appointment" },
+      { word: "die Vorsorgeuntersuchung", meaning: "preventive check-up" },
+      { word: "die Versichertenkarte", meaning: "health insurance card" },
+      { word: "gesetzlich versichert", meaning: "with public health insurance" },
+      { word: "passt mir", meaning: "suits me" },
+    ],
+  };
+
+  function buildPrompt({ goal, who, callLanguage, level, language }) {
+    return [
+      `You help a person prepare for a phone call in ${callLanguage}. Their level in ${callLanguage} is ${level} (CEFR). Be practical and kind.`,
+      `They are calling ${WHO_TEXT[who] || "an organisation"}. They need this from the call: ${goal || "not stated"}`,
+      `Write all lines the person says and all lines the other side says in ${callLanguage}, with short, simple sentences and common words that fit level ${level}. Use polite forms.`,
+      `Write every translation, and the other text (have_ready, meaning), in ${language}.`,
+      "Use [placeholders] for personal details, for example [Ihr Name]. Never invent personal details, phone numbers or dates.",
+      "The script is a likely flow of 6 to 10 turns. It starts with the other side answering the phone, then the person's opening, and ends when the goal is reached. Keep each line to one or two short sentences.",
+      "if_stuck: 3 to 5 phrases for when the person does not understand (repeat, speak slower, spell it). words: 5 to 8 key words they may hear.",
+      "",
+      "Reply with only one JSON object in this shape:",
+      `{"have_ready": ["what to have in front of you"],`,
+      ` "opening": {"line": "", "translation": ""},`,
+      ` "script": [{"who": "you|them", "line": "", "translation": ""}],`,
+      ` "if_stuck": [{"line": "", "translation": ""}],`,
+      ` "ending": {"line": "", "translation": ""},`,
+      ` "words": [{"word": "", "meaning": ""}]}`,
+    ].join("\n");
+  }
+
+  const MARK = "---TIPS---";
+  function buildPracticeInstructions({ goal, who, callLanguage, level, language }) {
+    return [
+      `Role-play a phone call with me. You play the other side: you work at ${WHO_TEXT[who] || "an organisation"}. I am the caller. I want this from the call: ${goal || "not stated"}`,
+      `Speak only ${callLanguage}, in a natural but simple way for a learner at level ${level} (CEFR). Keep each reply to one or two short sentences. Do not translate and do not explain while the call goes on.`,
+      "Play it like a real call: ask for details a real person would ask for, one thing at a time. Use fictional details if you must make something up.",
+      "Do not write my lines. Wait for me after each reply.",
+      `End the call politely once the goal is reached, or after about 8 turns. Then add a new line with exactly ${MARK} and, after it, 3 kind, specific tips in ${language} about how I did, with one phrase I could say better.`,
+      "Begin now: answer the phone, as the other side would.",
+    ].join("\n");
+  }
+
+  // ---- Hear it ----
+  let tts = null;
+  let speaking = null;
+  function hearButton(text) {
+    const button = H.el("button", { type: "button", class: "btn small hear", text: "Hear it", "aria-label": "Hear this line read aloud" });
+    button.addEventListener("click", () => {
+      if (!tts || !text) return;
+      const language = bcp47($("call-language").dataset.used || $("call-language").value);
+      if (speaking && speaking !== button) speaking.textContent = "Hear it";
+      speaking = button;
+      button.textContent = "Playing";
+      const done = () => { if (speaking === button) { button.textContent = "Hear it"; speaking = null; } };
+      Promise.resolve(tts.speak(text, { language })).then(done, done);
+    });
+    return button;
+  }
+  H.capability("tts").then((cap) => {
+    tts = cap || null;
+    if (tts) $("main").classList.remove("no-tts");
+  });
+
+  // ---- Render ----
+  const filled = (arr) => Array.isArray(arr) ? arr.filter((x) => x && (typeof x === "string" ? x.trim() : true)) : [];
+  const str = (v) => typeof v === "string" ? v.trim() : "";
+  const section = (title, ...children) => H.el("section", { class: "sheet" }, H.el("h2", { text: title }), ...children);
+
+  function speakLine(item, yours) {
+    return H.el("div", { class: "turn " + (yours ? "you" : "them") },
+      H.el("span", { class: "who", text: yours ? "You say" : "They say" }),
+      H.el("p", { class: "line", dir: "auto", text: str(item.line) }),
+      str(item.translation) ? H.el("p", { class: "trans", dir: "auto", text: str(item.translation) }) : null,
+      yours ? H.el("div", { class: "row" }, hearButton(str(item.line))) : null);
+  }
+
+  function render(data, { example = false } = {}) {
+    const out = [];
+    const opening = data.opening && typeof data.opening === "object" ? data.opening : {};
+    const have = filled(data.have_ready);
+    out.push(H.el("section", { class: "sheet accented" },
+      H.el("div", { class: "tags" }, example ? H.el("span", { class: "tag example", text: "Example" }) : null),
+      H.el("h2", { text: "Have ready" }),
+      have.length ? H.el("ul", { class: "plain-list", dir: "auto" }, have.map((t) => H.el("li", { text: typeof t === "string" ? t : String(t) }))) : H.el("p", { class: "hint", text: "Nothing special." })));
+
+    if (str(opening.line)) out.push(section("Your opening line", speakLine(opening, true)));
+
+    const script = filled(data.script).filter((t) => t && typeof t === "object" && str(t.line));
+    if (script.length) {
+      out.push(section("The call, line by line",
+        H.el("p", { class: "hint", text: "Your lines are on the right. The other person's likely lines are on the left. The real call may go a different way." }),
+        H.el("div", { class: "dialogue" }, script.map((t) => speakLine(t, t.who === "you")))));
+    }
+
+    const stuck = filled(data.if_stuck).filter((t) => t && typeof t === "object" && str(t.line));
+    if (stuck.length) {
+      out.push(section("If you get stuck", H.el("div", {}, stuck.map((t) => H.el("div", { class: "phrase" },
+        H.el("p", { class: "line", dir: "auto", text: str(t.line) }),
+        str(t.translation) ? H.el("p", { class: "trans hint", dir: "auto", text: str(t.translation) }) : null,
+        H.el("div", { class: "row" }, hearButton(str(t.line))))))));
+    }
+
+    const ending = data.ending && typeof data.ending === "object" ? data.ending : {};
+    if (str(ending.line)) out.push(section("How to end the call", speakLine(ending, true)));
+
+    const words = filled(data.words).filter((w) => w && typeof w === "object" && str(w.word));
+    if (words.length) {
+      out.push(section("Key words", H.el("dl", { class: "kv", dir: "auto" }, words.flatMap((w) => [H.el("dt", { text: str(w.word) }), H.el("dd", { text: str(w.meaning) })]))));
+    }
+    $("results").replaceChildren(...out);
+  }
+
+  function state() {
+    return { goal: $("goal").value.trim(), who, callLanguage: $("call-language").value, level, language: getLanguage() };
+  }
+
+  function say(message, kind = "") {
+    $("status").replaceChildren(message ? H.el("p", { class: kind === "thinking" ? "thinking" : `notice ${kind}`, text: message }) : "");
+  }
+
+  async function prepare() {
+    const s = state();
+    if (!s.goal) { say("Write what you need from the call first.", "warn"); return; }
+    controller?.abort();
+    controller = new AbortController();
+    const go = $("go");
+    go.disabled = true;
+    $("results").setAttribute("aria-busy", "true");
+    say("Preparing your call. This usually takes 10 to 30 seconds.", "thinking");
+    try {
+      const data = await H.askJSON(buildPrompt(s), { signal: controller.signal });
+      if (!data || typeof data !== "object") throw { code: "invalid_json" };
+      $("call-language").dataset.used = s.callLanguage;
+      render(data);
+      say("");
+      $("results").querySelector("h2")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (error) {
+      if (error?.code !== "cancelled") say(H.errorText(error), "danger");
+      if (!(await H.live())) go.textContent = "Copy as prompt";
+    } finally {
+      go.disabled = false;
+      $("results").removeAttribute("aria-busy");
+    }
+  }
+
+  function showPrompt() {
+    const s = state();
+    if (!s.goal) { say("Write what you need from the call first. Then the prompt includes it.", "warn"); return; }
+    say("");
+    $("results").replaceChildren(H.promptPanel(buildPrompt(s)));
+  }
+
+  $("form").addEventListener("submit", (e) => e.preventDefault());
+  H.wireMainButton({ button: $("go"), liveLabel: "Prepare my call", onLive: prepare, onCopy: showPrompt });
+
+  // ---- Practise the call ----
+  let turns = [];
+  let practiceLanguage = "German";
+  let practiceBusy = false;
+  let practiceController = null;
+  const pstatus = (message, kind = "") => $("practice-status").replaceChildren(message ? H.el("p", { class: kind === "thinking" ? "thinking" : `notice ${kind}`, text: message }) : "");
+
+  function bubble(role, text, { speakable = false } = {}) {
+    const you = role === "user";
+    return H.el("div", { class: "turn " + (you ? "you" : "them") },
+      H.el("span", { class: "who", text: you ? "You" : "Other side" }),
+      H.el("p", { class: "line", dir: "auto", text }),
+      speakable ? H.el("div", { class: "row" }, hearButton(text)) : null);
+  }
+
+  function addReply(raw) {
+    const full = typeof raw === "string" ? raw : (raw && typeof raw.text === "string" ? raw.text : "");
+    const at = full.indexOf(MARK);
+    const call = (at >= 0 ? full.slice(0, at) : full).trim();
+    const tips = at >= 0 ? full.slice(at + MARK.length).trim() : "";
+    if (call) $("practice-log").append(bubble("assistant", call, { speakable: true }));
+    if (tips) $("practice-log").append(H.el("div", { class: "notice", dir: "auto" }, H.el("strong", { text: "Three tips" }), H.el("p", { text: tips, style: "white-space: pre-wrap; margin: 6px 0 0" })));
+    if (tips) { $("practice-reply").hidden = true; }
+    return full;
+  }
+
+  async function turn() {
+    practiceBusy = true;
+    $("practice-send").disabled = true;
+    $("practice-start").disabled = true;
+    pstatus("The other side is answering.", "thinking");
+    practiceController?.abort();
+    practiceController = new AbortController();
+    try {
+      const reply = await H.ask(turns, { cache: false, tier: "quick", signal: practiceController.signal });
+      const full = addReply(reply);
+      if (!full.trim()) throw { code: "empty_completion" };
+      turns.push({ role: "assistant", content: full });
+      pstatus("");
+    } catch (error) {
+      if (error?.code !== "cancelled") pstatus(H.errorText(error), "danger");
+      if (turns.length === 1) {
+        turns = [];
+        $("practice-start").hidden = false;
+        $("practice-reset").hidden = true;
+        $("practice-reply").hidden = true;
+      } else {
+        const last = turns.pop();
+        $("practice-log").lastElementChild?.remove();
+        if (last && last.role === "user") $("practice-input").value = last.content;
+      }
+    } finally {
+      practiceBusy = false;
+      $("practice-send").disabled = false;
+      $("practice-start").disabled = false;
+    }
+  }
+
+  async function startPractice() {
+    if (practiceBusy) return;
+    const s = state();
+    if (!s.goal) { pstatus("Write what you need from the call at the top first.", "warn"); return; }
+    practiceLanguage = s.callLanguage;
+    $("call-language").dataset.used = s.callLanguage;
+    $("practice-input").setAttribute("lang", bcp47(s.callLanguage).slice(0, 2));
+    $("practice-log").replaceChildren();
+    turns = [{ role: "user", content: buildPracticeInstructions(s) }];
+    $("practice-start").hidden = true;
+    $("practice-reset").hidden = false;
+    $("practice-reply").hidden = false;
+    await turn();
+    $("practice-input").focus();
+  }
+
+  async function sendPractice() {
+    if (practiceBusy) return;
+    const text = $("practice-input").value.trim();
+    if (!text) { pstatus("Write your line first.", "warn"); return; }
+    $("practice-input").value = "";
+    $("practice-log").append(bubble("user", text));
+    turns.push({ role: "user", content: text });
+    await turn();
+    $("practice-input").focus();
+  }
+
+  $("practice-start").addEventListener("click", startPractice);
+  $("practice-send").addEventListener("click", sendPractice);
+  $("practice-input").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendPractice(); } });
+  $("practice-reset").addEventListener("click", () => {
+    practiceController?.abort();
+    turns = [];
+    $("practice-log").replaceChildren();
+    $("practice-reply").hidden = true;
+    $("practice-reset").hidden = true;
+    $("practice-start").hidden = false;
+    pstatus("");
+  });
+
+  H.live().then((isLive) => {
+    if (isLive) return;
+    $("practice-start").disabled = true;
+    $("practice-note").textContent = "Practice works in the live version of this page on claude.ai, where Claude can play the other side. In this copy you can still read the script above.";
+  });
+
+  $("goal").value = EXAMPLE_GOAL;
+  $("call-language").dataset.used = "German";
+  render(EXAMPLE_RESULT, { example: true });
+})();
+</script>

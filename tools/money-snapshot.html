@@ -1,0 +1,733 @@
+<title>Money Snapshot</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Drop in a bank statement CSV. See money in and out, spending by category, repeating payments and the biggest spends.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&display=swap">
+<link rel="stylesheet" href="shared.css">
+<style>
+  /* Money Snapshot: green. White text on #17703f is 6:1; dark text on the light green is above 9:1. */
+  :root { --accent: #17703f; --accent-ink: #ffffff; --accent-soft: #dcf0e3; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --accent: #6fd69a; --accent-ink: #0a2016; --accent-soft: #1a3a2a; } }
+  :root[data-theme="dark"] { --accent: #6fd69a; --accent-ink: #0a2016; --accent-soft: #1a3a2a; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: 12px; }
+  .stat { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .stat .k { font-size: 0.85rem; font-weight: 700; color: var(--ink-2); }
+  .stat .v { font: 700 1.5rem/1.2 var(--font-display); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .stat .v.pos { color: var(--ok); }
+  .stat .v.neg { color: var(--danger); }
+  .range { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+  .range .big-line { font-variant-numeric: tabular-nums; }
+  .bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .bar-row { display: grid; grid-template-columns: 11rem 1fr 10rem; gap: 4px 12px; align-items: center; }
+  .bar-row .name { font-weight: 700; font-size: 0.95rem; min-width: 0; overflow-wrap: anywhere; }
+  .bar-row .val { text-align: right; font-variant-numeric: tabular-nums; font-size: 0.95rem; }
+  .track { background: var(--paper); border: 1px solid var(--line); border-radius: 999px; height: 16px; overflow: hidden; }
+  .fill { background: var(--accent); height: 100%; border-radius: 999px; min-width: 3px; }
+  .lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .lines > li { display: grid; grid-template-columns: 1fr auto; gap: 2px 16px; padding: 10px 0; border-top: 1px solid var(--line); align-items: center; }
+  .lines > li:first-child { border-top: 0; padding-top: 0; }
+  .lines .who { font-weight: 700; min-width: 0; overflow-wrap: anywhere; }
+  .lines .nums { text-align: right; font-variant-numeric: tabular-nums; }
+  .lines .nums strong { display: block; }
+  .lines .meta { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 0.88rem; color: var(--ink-2); grid-column: 1; }
+  .lines .extra { grid-column: 1 / -1; }
+  .share { display: inline-flex; align-items: center; gap: 6px; font-size: 0.88rem; cursor: pointer; }
+  .share input, .check input { width: 18px; height: 18px; accent-color: var(--accent); }
+  .check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.95rem; }
+  .payee-line { display: grid; grid-template-columns: 1fr 12rem; gap: 6px 16px; padding: 10px 0; border-top: 1px solid var(--line); align-items: center; }
+  .payee-line:first-child { border-top: 0; padding-top: 0; }
+  .payee-line .who { min-width: 0; overflow-wrap: anywhere; }
+  .cols-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 12px 16px; margin-top: 10px; }
+  details.cols > summary { cursor: pointer; font-weight: 700; }
+  .used { font-size: 0.92rem; color: var(--ink-2); overflow-wrap: anywhere; }
+  .used b { color: var(--ink); }
+  details.sent > summary { cursor: pointer; font-weight: 700; font-size: 0.92rem; }
+  details.sent .quote { margin-top: 8px; max-height: 16rem; overflow: auto; font-size: 0.85rem; }
+  .tip-grid { display: flex; flex-direction: column; gap: 12px; }
+  .tip { border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 6px; background: var(--paper); }
+  @media (max-width: 34rem) {
+    .bar-row { grid-template-columns: 1fr auto; }
+    .bar-row .track { grid-column: 1 / -1; grid-row: 2; }
+    .payee-line { grid-template-columns: 1fr; }
+  }
+</style>
+
+<main class="page" id="main">
+  <header class="mast">
+    <p class="suite">Everyday Helpers</p>
+    <h1>Money Snapshot</h1>
+    <p class="lead">Drop in a bank statement as a CSV file. See what came in, what went out, where it went and what repeats every month.</p>
+  </header>
+
+  <form class="sheet accented" id="form" novalidate>
+    <div class="field">
+      <span class="label">Your bank statement (CSV)</span>
+      <div class="drop" id="drop" tabindex="0" role="button" aria-describedby="drop-hint">Tap to choose a CSV file, or drop it here</div>
+      <input type="file" id="file" accept=".csv,.txt,.tsv,text/csv,text/plain,text/tab-separated-values" hidden>
+      <p class="hint" id="drop-hint">Most online banks let you export your account as CSV. German and international formats work.</p>
+    </div>
+    <div class="grid-2">
+      <div class="field">
+        <label for="currency">Money shown in</label>
+        <select id="currency"></select>
+      </div>
+      <div class="field">
+        <span class="label">Data on this page</span>
+        <div class="row"><span id="source" class="used"></span><button type="button" class="btn small" id="reset" hidden>Show the example again</button></div>
+      </div>
+    </div>
+    <div id="columns"></div>
+    <p class="privacy">Your file never leaves this page. It is read here, in your browser. It is only sent anywhere if you press the tips button, and then only totals go out: category totals, repeating payments and the date range.</p>
+  </form>
+
+  <div id="status" role="status" aria-live="polite"></div>
+  <section class="results" id="results" aria-label="Your money snapshot"></section>
+
+  <section class="sheet" id="tips-card" aria-label="Saving tips">
+    <h2>Saving tips from Claude</h2>
+    <p class="hint">Claude sees only your category totals, your repeating payments (name and amount) and the date range. It never sees the file or single payments. Untick a repeating payment above to keep it out.</p>
+    <div class="grid-2">
+      <div class="field">
+        <label for="language">Tips in</label>
+        <select id="language"></select>
+      </div>
+    </div>
+    <details class="sent"><summary>Show exactly what is sent</summary><div class="quote" id="sent" dir="auto"></div></details>
+    <div class="row"><button type="button" class="btn primary" id="tips-btn">Ask Claude for 3 saving tips</button></div>
+    <div id="tips-status" role="status" aria-live="polite"></div>
+    <div id="tips-out"></div>
+  </section>
+
+  <p class="foot">Money Snapshot sorts payments with simple word rules, so some will land in the wrong category. It is a rough picture, not financial advice. If money is tight or you owe a lot, a free debt advice service can help.</p>
+</main>
+
+<script src="shared.js"></script>
+<script>
+(() => {
+  const H = window.Helpers;
+  const $ = (id) => document.getElementById(id);
+
+  // <parser>
+  const Parser = (() => {
+    const strip = (s) => String(s == null ? "" : s).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/ß/g, "ss").trim();
+
+    /* Split text into rows of cells. Handles quoted fields, "" escapes and line breaks inside quotes. */
+    function splitRows(text, d) {
+      const rows = [];
+      let row = [], cell = "", quoted = false, i = 0;
+      const n = text.length;
+      while (i < n) {
+        const c = text[i];
+        if (quoted) {
+          if (c === '"') {
+            if (text[i + 1] === '"') { cell += '"'; i += 2; continue; }
+            quoted = false; i++; continue;
+          }
+          cell += c; i++; continue;
+        }
+        if (c === '"' && cell.trim() === "") { quoted = true; cell = ""; i++; continue; }
+        if (c === d) { row.push(cell); cell = ""; i++; continue; }
+        if (c === "\r") { i++; continue; }
+        if (c === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; i++; continue; }
+        cell += c; i++;
+      }
+      if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
+      return rows.map((r) => r.map((x) => x.trim())).filter((r) => r.some((x) => x !== ""));
+    }
+
+    /* The delimiter that gives the most rows of one steady width wins. */
+    function detectDelimiter(text) {
+      const sample = text.slice(0, 200000);
+      let best = ",", bestScore = -1;
+      for (const d of [";", ",", "\t"]) {
+        const freq = new Map();
+        for (const r of splitRows(sample, d)) if (r.length >= 2) freq.set(r.length, (freq.get(r.length) || 0) + 1);
+        let score = 0;
+        for (const [len, n] of freq) score = Math.max(score, n * (len - 1));
+        if (score > bestScore) { best = d; bestScore = score; }
+      }
+      return best;
+    }
+
+    const ALIASES = {
+      date: ["buchungstag", "buchungsdatum", "booking date", "transaction date", "posting date", "date", "datum", "valuta", "valutadatum", "wertstellung", "value date"],
+      amount: ["betrag", "amount", "umsatz", "summe", "value", "transaction amount"],
+      debit: ["soll", "debit", "belastung", "ausgaben", "money out", "paid out", "withdrawal", "withdrawals", "outgoing"],
+      credit: ["haben", "credit", "gutschrift", "einnahmen", "money in", "paid in", "deposit", "deposits", "incoming"],
+      payee: ["auftraggeber/empfanger", "auftraggeber/empfaenger", "zahlungsempfanger", "zahlungsempfaenger", "empfanger", "empfaenger", "beguenstigter/zahlungspflichtiger", "begunstigter/zahlungspflichtiger", "name zahlungsbeteiligter", "beguenstigter", "begunstigter", "zahlungspflichtiger", "auftraggeber", "payee", "counterparty", "merchant", "name"],
+      text: ["verwendungszweck", "beschreibung", "description", "buchungstext", "details", "memo", "reference", "text", "notes", "purpose", "narrative"],
+    };
+    const BAD = {
+      date: /text|uhr|time/,
+      amount: /waehrung|wahrung|currency|datum|date|text|\bart\b|typ|saldo|balance|iban|bic|\bid$/,
+      payee: /iban|bic|bank|nummer|number|blz|\bid$/,
+      text: /iban|bic|datum|date|nummer|number|\bid$/,
+    };
+    const boundary = (cell, a) => cell === a || (cell.startsWith(a) && /^[\s(\[\/*-]/.test(cell.slice(a.length)));
+
+    function findCol(h, kind, used) {
+      const list = ALIASES[kind], bad = BAD[kind];
+      const ok = (i) => !used.has(i) && !(bad && bad.test(h[i]));
+      for (const a of list) { const i = h.findIndex((x, k) => ok(k) && boundary(x, a)); if (i >= 0) return i; }
+      if (kind === "debit" || kind === "credit") return -1;
+      for (const a of list) { const i = h.findIndex((x, k) => ok(k) && x.includes(a)); if (i >= 0) return i; }
+      return -1;
+    }
+
+    function detectMap(headers) {
+      const h = headers.map(strip), used = new Set(), map = {};
+      for (const kind of ["date", "amount", "payee", "text", "debit", "credit"]) {
+        if ((kind === "debit" || kind === "credit") && map.amount >= 0) { map[kind] = -1; continue; }
+        map[kind] = findCol(h, kind, used);
+        if (map[kind] >= 0) used.add(map[kind]);
+      }
+      return map;
+    }
+
+    function isHeaderRow(cells) {
+      const h = cells.map(strip);
+      const money = [...ALIASES.amount, ...ALIASES.debit, ...ALIASES.credit];
+      return h.some((c) => ALIASES.date.some((a) => boundary(c, a))) && h.some((c) => money.some((a) => boundary(c, a)));
+    }
+
+    function parseDate(s) {
+      s = String(s == null ? "" : s).trim();
+      let m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s].*)?$/.exec(s);
+      let y, mo, d;
+      if (m) { y = +m[1]; mo = +m[2]; d = +m[3]; }
+      else if ((m = /^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2}|\d{4})(?:[T\s,].*)?$/.exec(s))) {
+        d = +m[1]; mo = +m[2]; y = +m[3];
+        if (m[3].length === 2) y += 2000;
+        if (s.includes("/") && mo > 12 && d <= 12) { const t = d; d = mo; mo = t; }
+      } else return null;
+      if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+      const date = new Date(y, mo - 1, d);
+      return date.getMonth() === mo - 1 ? date : null;
+    }
+
+    /* 1.234,56  -1,234.56  (12.00)  12,00-  1234  EUR 12.50 */
+    function parseAmount(raw) {
+      let s = String(raw == null ? "" : raw).trim();
+      if (!s) return NaN;
+      let paren = false;
+      if (/^\(.*\)$/.test(s)) { paren = true; s = s.slice(1, -1); }
+      s = s.replace(/[−–]/g, "-").replace(/[€$£]|\b(?:eur|gbp|usd|chf|pln|try)\b|zł|\btl\b/gi, "").replace(/[\s  ']/g, "");
+      if (/-$/.test(s)) s = "-" + s.slice(0, -1);
+      if (!/^[+-]?(?:\d[\d.,]*|[.,]\d+)$/.test(s)) return NaN;
+      const lastDot = s.lastIndexOf("."), lastComma = s.lastIndexOf(",");
+      let dec = null;
+      if (lastDot >= 0 && lastComma >= 0) dec = lastDot > lastComma ? "." : ",";
+      else if (lastDot >= 0 || lastComma >= 0) {
+        const sep = lastDot >= 0 ? "." : ",";
+        const count = s.split(sep).length - 1;
+        const after = s.length - s.lastIndexOf(sep) - 1;
+        if (count > 1) dec = null;
+        else if (after === 3 && !/^[+-]?0[.,]/.test(s)) dec = null;
+        else dec = sep;
+      }
+      let t = s;
+      if (dec === null) t = t.replace(/[.,]/g, "");
+      else t = t.split(dec === "." ? "," : ".").join("").replace(dec, ".");
+      const v = parseFloat(t);
+      if (isNaN(v)) return NaN;
+      return paren ? -Math.abs(v) : v;
+    }
+
+    /* No header row: guess the columns from what the cells look like. */
+    function guessMap(rows, width) {
+      const map = { date: -1, amount: -1, debit: -1, credit: -1, payee: -1, text: -1 };
+      const sample = rows.slice(0, 40);
+      const share = (c, test) => sample.filter((r) => test(r[c])).length / Math.max(1, sample.length);
+      const isDate = (v) => parseDate(v) !== null;
+      const isNum = (v) => !isDate(v) && !isNaN(parseAmount(v));
+      for (let c = 0; c < width; c++) if (map.date < 0 && share(c, isDate) >= 0.8) map.date = c;
+      const nums = [];
+      for (let c = 0; c < width; c++) if (c !== map.date && share(c, isNum) >= 0.8) nums.push(c);
+      map.amount = nums.find((c) => sample.some((r) => parseAmount(r[c]) < 0)) ?? (nums.length ? nums[0] : -1);
+      const texts = [];
+      for (let c = 0; c < width; c++) {
+        if (c === map.date || c === map.amount || nums.includes(c)) continue;
+        const avg = sample.reduce((a, r) => a + String(r[c] || "").length, 0) / Math.max(1, sample.length);
+        if (avg > 0) texts.push([c, avg]);
+      }
+      texts.sort((a, b) => a[0] - b[0]);
+      if (texts[0]) map.payee = texts[0][0];
+      const longest = texts.filter(([c]) => c !== map.payee).sort((a, b) => b[1] - a[1])[0];
+      if (longest) map.text = longest[0];
+      return map;
+    }
+
+    /* Text in, table out: {delimiter, headerIdx, headers, rows, map, guessed}. */
+    function parseTable(text) {
+      text = String(text).replace(/^﻿/, "");
+      const delimiter = detectDelimiter(text);
+      const all = splitRows(text, delimiter);
+      const freq = new Map();
+      for (const r of all) if (r.length >= 2) freq.set(r.length, (freq.get(r.length) || 0) + 1);
+      let width = 0, top = 0;
+      for (const [len, n] of freq) if (n > top || (n === top && len > width)) { top = n; width = len; }
+      let headerIdx = all.slice(0, 40).findIndex(isHeaderRow);
+      let guessed = false;
+      if (headerIdx < 0) { headerIdx = Math.max(0, all.findIndex((r) => r.length === width)); guessed = true; }
+      let headers = all[headerIdx] || [];
+      let rows;
+      let map;
+      if (guessed && headers.some((c) => parseDate(c))) {
+        rows = all.slice(headerIdx).filter((r) => r.length >= 2);
+        headers = Array.from({ length: width }, (_, i) => "Column " + (i + 1));
+        map = guessMap(rows, width);
+      } else {
+        rows = all.slice(headerIdx + 1).filter((r) => r.length >= 2);
+        map = detectMap(headers);
+      }
+      return { delimiter, headerIdx, headers, rows, map, guessed };
+    }
+
+    function buildTransactions(rows, map, opts) {
+      const flip = Boolean(opts && opts.flip);
+      const txs = [];
+      let skipped = 0;
+      for (const r of rows) {
+        const date = map.date >= 0 ? parseDate(r[map.date]) : null;
+        let amount = NaN;
+        if (map.amount >= 0) amount = parseAmount(r[map.amount]);
+        else if (map.debit >= 0 || map.credit >= 0) {
+          const d = map.debit >= 0 ? parseAmount(r[map.debit]) : NaN;
+          const c = map.credit >= 0 ? parseAmount(r[map.credit]) : NaN;
+          if (!isNaN(d) || !isNaN(c)) amount = (isNaN(c) ? 0 : Math.abs(c)) - (isNaN(d) ? 0 : Math.abs(d));
+        }
+        if (!date || isNaN(amount) || amount === 0) { skipped++; continue; }
+        const text = map.text >= 0 ? String(r[map.text] || "") : "";
+        let payee = map.payee >= 0 ? String(r[map.payee] || "") : "";
+        if (!payee) payee = text.slice(0, 40);
+        txs.push({ date, amount: flip ? -amount : amount, payee: payee.trim(), text });
+      }
+      return { txs, skipped };
+    }
+
+    return { strip, parseTable, buildTransactions, parseDate, parseAmount, detectDelimiter, splitRows };
+  })();
+  // </parser>
+
+  const { strip } = Parser;
+
+  /* ---------- Categories ---------- */
+  const CATS = [
+    ["housing", "Housing and rent"], ["groceries", "Groceries"], ["eating", "Eating out"], ["transport", "Transport"],
+    ["phone", "Phone and internet"], ["energy", "Energy and water"], ["insurance", "Insurance"], ["subscriptions", "Subscriptions"],
+    ["shopping", "Shopping"], ["health", "Health and drugstore"], ["cash", "Cash"], ["transfers", "Transfers"], ["income", "Income"], ["other", "Other"],
+  ];
+  const CAT_NAME = Object.fromEntries(CATS);
+  /* Keywords are lowercase without accents. A word match starts at a word start; "$" at the end means it must also end the word. First matching group wins. */
+  const RULES = [
+    ["transfers", ["umbuchung", "ubertrag", "eigenubertrag", "eigene konto", "own account", "internal transfer", "transfer to savings", "tagesgeld", "sparkonto", "savings pot"]],
+    ["cash", ["geldautomat", "bargeld", "barauszahlung", "sb-auszahlung", "sb auszahlung", "auszahlung", "atm", "cash withdrawal", "cashpoint"]],
+    ["housing", ["miete", "kaltmiete", "warmmiete", "rent$", "hausverwaltung", "wohnungsbau", "wohnbau", "immobilien", "vermieter", "landlord", "nebenkosten", "hausgeld", "mortgage", "baufinanzierung", "letting"]],
+    ["energy", ["stadtwerke", "strom", "erdgas", "gas$", "energie", "energy", "vattenfall", "e.on", "eon$", "enbw", "naturstrom", "fernwarme", "wasserwerk", "wasser", "heizung", "electric", "british gas", "edf"]],
+    ["phone", ["telekom", "vodafone", "o2$", "telefonica", "1&1", "1und1", "congstar", "freenet", "mobilcom", "drillisch", "mobilfunk", "internet", "dsl$", "glasfaser", "handy", "fonic", "aldi talk", "sim only", "tmobile", "t-mobile", "pyur", "virgin media", "broadband", "telefon"]],
+    ["insurance", ["versicherung", "allianz", "huk", "ergo$", "axa$", "debeka", "hdi$", "signal iduna", "generali", "haftpflicht", "krankenkasse", "techniker krankenkasse", "aok$", "barmer", "dak$", "ikk$", "insurance", "aviva", "rechtsschutz", "cosmos direkt"]],
+    ["subscriptions", ["netflix", "spotify", "disney", "amazon prime", "prime video", "apple.com/bill", "itunes", "google play", "youtube", "dazn", "audible", "paramount", "icloud", "dropbox", "microsoft", "adobe", "openai", "chatgpt", "anthropic", "patreon", "fitx", "mcfit", "urban sports", "fitnessstudio", "fitness", "gym$", "gym ", "john reed", "clever fit", "abo$", "abo ", "abonnement", "subscription", "membership", "playstation", "xbox", "nintendo", "deezer", "kindle", "github", "canva", "zeit online", "spiegel", "streaming"]],
+    ["transport", ["deutsche bahn", "db vertrieb", "bahn$", "bahncard", "bvg", "mvv", "hvv", "rmv", "vrr", "kvb", "nahverkehr", "deutschlandticket", "deutschland-ticket", "monatskarte", "uber$", "bolt$", "free now", "freenow", "lime$", "flixbus", "tankstelle", "aral", "shell", "esso", "jet$", "total$", "omv", "fuel", "petrol", "parkhaus", "parken", "parking", "taxi", "sixt", "europcar", "share now", "tfl", "oyster", "lufthansa", "ryanair", "easyjet", "eurowings", "adac", "kfz", "werkstatt", "tuv", "tankstop"]],
+    ["groceries", ["rewe", "edeka", "aldi", "lidl", "penny", "netto", "kaufland", "norma$", "tegut", "dennree", "denns", "alnatura", "biomarkt", "bio company", "globus", "marktkauf", "famila", "nahkauf", "migros", "carrefour", "tesco", "sainsbury", "asda", "morrisons", "waitrose", "ocado", "supermarkt", "supermarket", "getranke", "getraenke", "backerei", "baeckerei", "bakery", "metzger", "fleischerei", "wochenmarkt", "hellofresh", "flink", "gorillas", "lebensmittel", "grocery", "greengrocer"]],
+    ["eating", ["restaurant", "gaststatte", "gaststaette", "gasthaus", "wirtshaus", "cafe", "kaffee", "coffee", "starbucks", "mcdonald", "burger king", "kfc", "subway", "dominos", "pizza", "lieferando", "lieferdienst", "wolt", "uber eats", "ubereats", "deliveroo", "just eat", "imbiss", "kebab", "doner", "bistro", "brauhaus", "vapiano", "nordsee", "kamps", "dunkin", "sushi", "eiscafe", "takeaway", "pub$", "bar$", "kneipe", "biergarten"]],
+    ["health", ["apotheke", "pharmacy", "arzt", "zahnarzt", "praxis", "krankenhaus", "klinik", "physio", "optik", "fielmann", "drogerie", "dm drogerie", "dm-drogerie", "rossmann", "muller drogerie", "boots", "optician"]],
+    ["shopping", ["amazon", "zalando", "h&m", "zara", "primark", "ikea", "otto$", "mediamarkt", "media markt", "saturn$", "ebay", "aliexpress", "temu", "shein", "decathlon", "obi$", "bauhaus", "hornbach", "tk maxx", "c&a", "deichmann", "thalia", "hugendubel", "apple store", "conrad", "etsy", "vinted", "kleinanzeigen", "lego", "spielwaren", "tedi", "woolworth", "asos", "onlineshop", "online shop", "versandhandel", "kaufhaus", "modehaus", "bekleidung", "elektronik", "bestellung", "shop$"]],
+  ];
+  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\\/]/g, "\\$&");
+  const COMPILED = RULES.map(([cat, words]) => [cat, words.map((w) => {
+    const end = w.endsWith("$");
+    const core = escapeRe(end ? w.slice(0, -1) : w);
+    return new RegExp("(^|[^a-z0-9])" + core + (end ? "(?![a-z0-9])" : ""));
+  })]);
+  const hits = (cat, text) => COMPILED.find(([c]) => c === cat)[1].some((re) => re.test(text));
+
+  function categorise(tx) {
+    const text = strip(tx.payee + " " + tx.text);
+    if (tx.amount > 0) return hits("transfers", text) ? "transfers" : "income";
+    for (const [cat, res] of COMPILED) if (res.some((re) => re.test(text))) return cat;
+    return "other";
+  }
+  const payeeKey = (name) => {
+    const words = strip(name).replace(/[0-9]+/g, " ").replace(/[^a-z\s]/g, " ").split(/\s+/).filter((w) => w.length > 1).slice(0, 3).join(" ");
+    return words || strip(name).slice(0, 20) || "unknown";
+  };
+  const monthOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+
+  function prepare(list) {
+    return list.map((t) => ({ ...t, key: payeeKey(t.payee), month: monthOf(t.date), autoCat: categorise(t) }))
+      .sort((a, b) => a.date - b.date);
+  }
+
+  /* ---------- Example data: about three months, fictional, relative to today ---------- */
+  function exampleTxs() {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const start = new Date(today); start.setDate(start.getDate() - 92);
+    const list = [];
+    let seed = 11;
+    const rnd = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+    const vary = (base, spread) => Math.round((base + (rnd() * 2 - 1) * spread) * 100) / 100;
+    for (let back = 3; back >= 0; back--) {
+      const first = new Date(today.getFullYear(), today.getMonth() - back, 1);
+      const y = first.getFullYear(), m = first.getMonth();
+      const add = (day, amount, payee, text) => { const date = new Date(y, m, day); if (date >= start && date < today) list.push({ date, amount, payee, text }); };
+      add(1, -820, "Hausverwaltung Musterstadt", "Miete Wohnung");
+      add(1, -58, "Deutschlandticket Nahverkehr Muster", "Monatsabo");
+      add(2, -29.9, "Fitnessstudio Muster", "Mitgliedsbeitrag");
+      add(3, -42.3, "Musterschutz Versicherung", "Haftpflicht");
+      add(5, -68, "Stadtwerke Musterstadt", "Abschlag Strom");
+      add(8, -24.99, "Musterfon Mobilfunk", "Mobilfunk Tarif");
+      add(8, -39.9, "Beispielnet Internet DSL", "Internet");
+      add(12, -12.99, "Musterstream Abo", "Streaming");
+      add(9, -100, "Geldautomat Musterstadt", "Auszahlung");
+      add(27, 2850, "Beispiel GmbH", "Gehalt");
+      add(28, -200, "Umbuchung Tagesgeld", "Sparen");
+      for (const day of [4, 10, 17, 24]) add(day, -vary(38, 14), "Supermarkt Musterstadt", "Einkauf");
+      add(7, -vary(22, 6), "Biomarkt Beispiel", "Einkauf");
+      add(14, -vary(5.4, 1.5), "Backerei Mustermann", "Brot");
+      add(6, -vary(34, 8), "Restaurant Zur Linde", "Abendessen");
+      add(15, -vary(18, 4), "Lieferdienst Muster Pizza", "Bestellung");
+      add(20, -vary(11, 3), "Cafe Beispiel", "Kaffee");
+      add(11, -vary(49, 20), "Onlineshop Beispiel", "Bestellung");
+      add(22, -vary(64, 20), "Modehaus Muster", "Kleidung");
+      add(16, -vary(18, 10), "Apotheke am Markt", "Rezept");
+      add(18, -vary(55, 20), "Tankstelle Musterstadt", "Tanken");
+    }
+    return prepare(list);
+  }
+  const EXAMPLE_TIPS = {
+    tips: [
+      { title: "Check the gym and streaming plans", detail: "You pay 29.90 for the gym and 12.99 for streaming each month. If you use either less than twice a month, pause or cancel it.", saving_per_month: 13 },
+      { title: "Cook one more evening at home", detail: "Eating out and deliveries add up each month. Swapping two of them for a home meal keeps most of that money.", saving_per_month: 30 },
+      { title: "Compare your internet and phone plans", detail: "You pay 39.90 and 24.99 for internet and mobile. Plans that are new to the market are often cheaper. Check them once a year.", saving_per_month: 10 },
+    ],
+  };
+
+  /* ---------- State ---------- */
+  const state = { txs: exampleTxs(), example: true, fileName: "", overrides: new Map(), currency: "EUR", showAll: false, excluded: new Set(), table: null, map: null, flip: false, skipped: 0 };
+  const catOf = (t) => state.overrides.get(t.key) || t.autoCat;
+  let fmtCache = null;
+  const fmt = (n, digits = 2) => {
+    if (!fmtCache || fmtCache.c !== state.currency || fmtCache.d !== digits) {
+      let f;
+      try { f = new Intl.NumberFormat(undefined, { style: "currency", currency: state.currency, minimumFractionDigits: digits, maximumFractionDigits: digits }); }
+      catch { f = { format: (x) => x.toFixed(digits) + " " + state.currency }; }
+      fmtCache = { c: state.currency, d: digits, f };
+    }
+    return fmtCache.f.format(n);
+  };
+  const dateText = (d) => d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const median = (a) => { const s = a.slice().sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+
+  /* ---------- Calculations ---------- */
+  function totals() {
+    let inn = 0, out = 0, transfers = 0;
+    const byCat = new Map();
+    for (const t of state.txs) {
+      const c = catOf(t);
+      if (c === "transfers") { transfers += Math.abs(t.amount); continue; }
+      if (t.amount > 0) inn += t.amount;
+      else { out += -t.amount; byCat.set(c, (byCat.get(c) || 0) + -t.amount); }
+    }
+    const rows = [...byCat].map(([id, amount]) => ({ id, name: CAT_NAME[id] || id, amount })).sort((a, b) => b.amount - a.amount);
+    return { inn, out, net: inn - out, transfers, rows };
+  }
+
+  const NOT_RECURRING = new Set(["groceries", "eating", "shopping", "cash", "transfers"]);
+  function recurring() {
+    const groups = new Map();
+    for (const t of state.txs) {
+      if (t.amount >= 0 || NOT_RECURRING.has(catOf(t))) continue;
+      if (!groups.has(t.key)) groups.set(t.key, []);
+      groups.get(t.key).push(t);
+    }
+    const found = [];
+    for (const [key, list] of groups) {
+      const med = median(list.map((t) => -t.amount));
+      const cluster = list.filter((t) => Math.abs(-t.amount - med) / med <= 0.1);
+      const months = new Set(cluster.map((t) => t.month));
+      if (months.size < 2 || cluster.length / months.size > 2) continue;
+      const typical = median(cluster.map((t) => -t.amount));
+      found.push({ key, name: cluster[0].payee || key, typical, months: months.size, yearly: typical * 12, cat: catOf(cluster[cluster.length - 1]) });
+    }
+    return found.sort((a, b) => b.yearly - a.yearly);
+  }
+
+  function range() {
+    if (!state.txs.length) return null;
+    const from = state.txs[0].date, to = state.txs[state.txs.length - 1].date;
+    const days = Math.round((to - from) / 86400000) + 1;
+    return { from, to, days };
+  }
+
+  /* ---------- Prompt for tips: only totals, the recurring list and the date range ---------- */
+  function buildPrompt({ rows, repeats, from, to, days, currency, language }) {
+    return [
+      "You are a calm, practical money coach. Below are summed-up numbers from one person's bank statement. You see only totals, never single payments.",
+      `Today's date is ${H.todayISO()}. The statement covers ${from} to ${to} (${days} days). Amounts are in ${currency}.`,
+      `Write every title and detail in ${language}, in short, plain sentences.`,
+      "",
+      "Spending by category over the whole period:",
+      ...(rows.length ? rows.map((r) => `- ${r.name}: ${r.amount.toFixed(2)}`) : ["- (none)"]),
+      "",
+      "Payments that repeat (typical amount per month):",
+      ...(repeats.length ? repeats.map((r) => `- ${r.name}: ${r.typical.toFixed(2)} (seen in ${r.months} months)`) : ["- (none)"]),
+      "",
+      "Give exactly 3 concrete ideas to spend less. Base each idea only on the numbers above, and name the category or the payment it is about.",
+      "Do not invent figures. \"saving_per_month\" is your realistic estimate in " + currency + " as a plain number, or 0 if you cannot estimate it.",
+      "No investment, tax or legal advice.",
+      "",
+      "Reply with only one JSON object in this shape:",
+      `{"tips": [{"title": "short title", "detail": "one or two sentences", "saving_per_month": 0}]}`,
+    ].join("\n");
+  }
+  const getLanguage = H.languagePicker($("language"));
+  function promptInput() {
+    const t = totals(), r = range();
+    const repeats = recurring().filter((x) => !state.excluded.has(x.key));
+    return { rows: t.rows.map((x) => ({ name: x.name, amount: x.amount })), repeats, from: r ? isoOf(r.from) : "", to: r ? isoOf(r.to) : "", days: r ? r.days : 0, currency: state.currency, language: getLanguage() };
+  }
+  const updateSent = () => { $("sent").textContent = buildPrompt(promptInput()); };
+
+  /* ---------- Rendering ---------- */
+  const boxes = {
+    summary: H.el("section", { class: "sheet", "aria-label": "Summary" }),
+    chart: H.el("section", { class: "sheet", "aria-label": "Spending by category" }),
+    recur: H.el("section", { class: "sheet", "aria-label": "Repeating payments" }),
+    largest: H.el("section", { class: "sheet", "aria-label": "Largest spends" }),
+    payees: H.el("section", { class: "sheet", "aria-label": "Categories by payee" }),
+  };
+  $("results").replaceChildren(...Object.values(boxes));
+
+  function renderSummary() {
+    const t = totals(), r = range();
+    const stat = (k, v, cls = "") => H.el("div", { class: "stat" }, H.el("span", { class: "k", text: k }), H.el("span", { class: `v ${cls}`.trim(), text: v }));
+    const positive = state.txs.length && state.txs.every((x) => x.amount > 0);
+    boxes.summary.replaceChildren(...[
+      H.el("div", { class: "row" }, state.example ? H.el("span", { class: "tag example", text: "Example" }) : null, H.el("h2", { text: "Your snapshot" })),
+      r ? H.el("div", { class: "range" },
+        H.el("span", { class: "big-line", text: `${dateText(r.from)} to ${dateText(r.to)}` }),
+        H.el("span", { class: "hint", text: `${r.days} days, ${state.txs.length} payments` })) : null,
+      H.el("div", { class: "stats" }, stat("Money in", fmt(t.inn)), stat("Money out", fmt(t.out)), stat("Net", fmt(t.net), t.net >= 0 ? "pos" : "neg")),
+      t.transfers > 0 ? H.el("p", { class: "hint", text: `Transfers between your own accounts (${fmt(t.transfers)}) are left out of these numbers.` }) : null,
+      positive ? H.el("p", { class: "notice warn", text: "Every amount in this file is positive. If these are your spends, tick \"Spending is shown as positive numbers\" under the columns above." }) : null].filter(Boolean));
+  }
+
+  function renderChart() {
+    const t = totals();
+    const max = t.rows.length ? t.rows[0].amount : 1;
+    boxes.chart.replaceChildren(
+      H.el("h2", { text: "Where the money went" }),
+      t.rows.length ? H.el("ul", { class: "bars" }, t.rows.map((row) => {
+        const fill = H.el("div", { class: "fill" });
+        fill.style.width = Math.max(1, (row.amount / max) * 100).toFixed(1) + "%";
+        return H.el("li", { class: "bar-row" },
+          H.el("span", { class: "name", text: row.name }),
+          H.el("div", { class: "track", role: "img", "aria-label": `${row.name}: ${Math.round((row.amount / t.out) * 100)} percent of spending` }, fill),
+          H.el("span", { class: "val num", text: `${fmt(row.amount)} · ${Math.round((row.amount / t.out) * 100)}%` }));
+      })) : H.el("p", { class: "hint", text: "No spending found." }));
+  }
+
+  function renderRecurring() {
+    const list = recurring();
+    const perMonth = list.reduce((a, x) => a + x.typical, 0), perYear = list.reduce((a, x) => a + x.yearly, 0);
+    boxes.recur.replaceChildren(
+      H.el("h2", { text: "Payments that repeat" }),
+      H.el("p", { class: "hint", text: "Same payee in 2 or more months, with amounts within 10% of each other. Groceries, eating out, shopping and cash are not counted." }),
+      list.length ? H.el("ul", { class: "lines" }, list.map((x) => {
+        const box = H.el("input", { type: "checkbox", "aria-label": `Include ${x.name} in the tips request` });
+        box.checked = !state.excluded.has(x.key);
+        box.addEventListener("change", () => { if (box.checked) state.excluded.delete(x.key); else state.excluded.add(x.key); updateSent(); });
+        return H.el("li", {},
+          H.el("span", { class: "who", dir: "auto", text: x.name }),
+          H.el("span", { class: "nums" }, H.el("strong", { text: `${fmt(x.typical)} a month` }), H.el("span", { class: "hint", text: `${fmt(x.yearly, 0)} a year` })),
+          H.el("span", { class: "meta" }, H.el("span", { class: "tag", text: CAT_NAME[x.cat] || x.cat }), H.el("span", { text: `seen in ${x.months} months` }),
+            H.el("label", { class: "share" }, box, "Share with Claude")));
+      })) : H.el("p", { class: "hint", text: "No repeating payments found yet. You need at least 2 months of data." }),
+      list.length ? H.el("p", { class: "notice", text: `Together: about ${fmt(perMonth)} a month, ${fmt(perYear, 0)} a year.` }) : null);
+  }
+
+  function renderLargest() {
+    const list = state.txs.filter((t) => t.amount < 0 && catOf(t) !== "transfers").sort((a, b) => a.amount - b.amount).slice(0, 5);
+    boxes.largest.replaceChildren(
+      H.el("h2", { text: "Your 5 biggest single spends" }),
+      list.length ? H.el("ol", { class: "lines" }, list.map((t) => H.el("li", {},
+        H.el("span", { class: "who", dir: "auto", text: t.payee || "(no name)" }),
+        H.el("span", { class: "nums" }, H.el("strong", { text: fmt(-t.amount) })),
+        H.el("span", { class: "meta" }, H.el("span", { text: dateText(t.date) }), H.el("span", { class: "tag", text: CAT_NAME[catOf(t)] || catOf(t) }))))) : H.el("p", { class: "hint", text: "No spending found." }));
+  }
+
+  function payeeList() {
+    const m = new Map();
+    for (const t of state.txs) {
+      let p = m.get(t.key);
+      if (!p) { p = { key: t.key, name: t.payee || t.key, n: 0, out: 0, inn: 0, top: 0, autoCat: t.autoCat }; m.set(t.key, p); }
+      p.n++;
+      if (t.amount < 0) p.out += -t.amount; else p.inn += t.amount;
+      if (Math.abs(t.amount) > p.top) { p.top = Math.abs(t.amount); p.autoCat = t.autoCat; }
+    }
+    return [...m.values()].sort((a, b) => (b.out + b.inn) - (a.out + a.inn));
+  }
+
+  function renderPayees() {
+    const all = payeeList();
+    const shown = state.showAll ? all.slice(0, 200) : all.slice(0, 10);
+    const toggle = all.length > 10 ? H.el("button", { type: "button", class: "btn small", text: state.showAll ? "Show fewer" : `Show all ${all.length} payees` }) : null;
+    if (toggle) toggle.addEventListener("click", () => { state.showAll = !state.showAll; renderPayees(); });
+    boxes.payees.replaceChildren(
+      H.el("h2", { text: "Check the categories" }),
+      H.el("p", { class: "hint", text: "Wrong category? Change it for a payee and every number above updates." }),
+      H.el("div", { class: "lines" }, shown.map((p) => {
+        const select = H.el("select", { "aria-label": `Category for ${p.name}` }, CATS.map(([id, name]) => H.el("option", { value: id, text: name })));
+        select.value = state.overrides.get(p.key) || p.autoCat;
+        select.addEventListener("change", () => { state.overrides.set(p.key, select.value); renderMain(); });
+        return H.el("div", { class: "payee-line" },
+          H.el("div", { class: "who", dir: "auto" }, H.el("strong", { text: p.name }),
+            H.el("div", { class: "hint num", text: `${p.n} payment${p.n === 1 ? "" : "s"}${p.out ? " · out " + fmt(p.out) : ""}${p.inn ? " · in " + fmt(p.inn) : ""}` })),
+          select);
+      })),
+      toggle ? H.el("div", { class: "row" }, toggle) : null);
+  }
+
+  function renderMain() { renderSummary(); renderChart(); renderRecurring(); renderLargest(); updateSent(); }
+  function renderAll() { renderMain(); renderPayees(); }
+
+  /* ---------- Tips ---------- */
+  function renderTips(data, example = false) {
+    const tips = (Array.isArray(data?.tips) ? data.tips : []).map((t) => ({
+      title: String(t?.title || "").trim(), detail: String(t?.detail || "").trim(), saving: Number(t?.saving_per_month),
+    })).filter((t) => t.title || t.detail).slice(0, 3);
+    if (!tips.length) throw { code: "invalid_json" };
+    $("tips-out").replaceChildren(H.el("div", { class: "tip-grid", dir: "auto" },
+      example ? H.el("span", { class: "tag example", text: "Example" }) : null,
+      tips.map((t) => H.el("div", { class: "tip" },
+        H.el("h3", { text: t.title || "Tip" }),
+        t.detail ? H.el("p", { text: t.detail }) : null,
+        Number.isFinite(t.saving) && t.saving > 0 ? H.el("span", { class: "tag ok num", text: `About ${fmt(t.saving, 0)} a month` }) : null))));
+  }
+  let controller = null;
+  const tipsStatus = (message, kind = "") => $("tips-status").replaceChildren(message ? H.el("p", { class: kind === "thinking" ? "thinking" : `notice ${kind}`, text: message }) : "");
+  async function askTips() {
+    controller?.abort();
+    controller = new AbortController();
+    const btn = $("tips-btn");
+    btn.disabled = true;
+    tipsStatus("Reading your totals. This usually takes 10 to 30 seconds.", "thinking");
+    try {
+      const data = await H.askJSON(buildPrompt(promptInput()), { signal: controller.signal });
+      if (!data || typeof data !== "object") throw { code: "invalid_json" };
+      renderTips(data);
+      tipsStatus("");
+    } catch (error) {
+      if (error?.code !== "cancelled") tipsStatus(H.errorText(error), "danger");
+      if (!(await H.live())) btn.textContent = "Copy tips prompt";
+    } finally {
+      btn.disabled = false;
+    }
+  }
+  function showTipsPrompt() {
+    tipsStatus("");
+    $("tips-out").replaceChildren(H.promptPanel(buildPrompt(promptInput())));
+  }
+  H.wireMainButton({ button: $("tips-btn"), liveLabel: "Ask Claude for 3 saving tips", copyLabel: "Copy tips prompt", onLive: askTips, onCopy: showTipsPrompt });
+  $("language").addEventListener("change", updateSent);
+
+  /* ---------- Currency ---------- */
+  const CURRENCIES = ["EUR", "GBP", "USD", "CHF", "PLN", "TRY"];
+  $("currency").replaceChildren(...CURRENCIES.map((c) => H.el("option", { value: c, text: c })));
+  const savedCurrency = H.store.get("currency");
+  if (CURRENCIES.includes(savedCurrency)) state.currency = savedCurrency;
+  $("currency").value = state.currency;
+  $("currency").addEventListener("change", () => { state.currency = $("currency").value; H.store.set("currency", state.currency); renderAll(); });
+
+  /* ---------- File loading and columns ---------- */
+  const say = (message, kind = "") => $("status").replaceChildren(message ? H.el("p", { class: `notice ${kind}`.trim(), text: message }) : "");
+  const FIELDS = [["date", "Date"], ["amount", "Amount"], ["debit", "Money out"], ["credit", "Money in"], ["payee", "Payee"], ["text", "Text"]];
+
+  function renderColumns(failed = false) {
+    const box = $("columns");
+    const table = state.table;
+    if (!table) { box.replaceChildren(); return; }
+    const label = (i) => (i >= 0 ? table.headers[i] || `Column ${i + 1}` : "none");
+    const used = FIELDS.filter(([k]) => state.map[k] >= 0).map(([k, name]) => H.el("span", {}, `${name}: `, H.el("b", { text: label(state.map[k]) }), " · "));
+    const selects = FIELDS.map(([k, name]) => {
+      const sel = H.el("select", { id: "col-" + k }, H.el("option", { value: "-1", text: "(none)" }), table.headers.map((h, i) => H.el("option", { value: String(i), text: h || `Column ${i + 1}` })));
+      sel.value = String(state.map[k]);
+      sel.addEventListener("change", () => { state.map[k] = Number(sel.value); rebuild(true); });
+      return H.el("div", { class: "field" }, H.el("label", { for: "col-" + k, text: name }), sel);
+    });
+    const flip = H.el("input", { type: "checkbox", id: "flip" });
+    flip.checked = state.flip;
+    flip.addEventListener("change", () => { state.flip = flip.checked; rebuild(true); });
+    const details = H.el("details", { class: "cols" },
+      H.el("summary", { text: "Change columns" }),
+      H.el("div", { class: "cols-grid" }, selects),
+      H.el("div", { class: "row", style: "margin-top:10px" }, H.el("label", { class: "check", for: "flip" }, flip, "Spending is shown as positive numbers")));
+    if (failed) details.open = true;
+    box.replaceChildren(H.el("p", { class: "used", dir: "auto" }, H.el("b", { text: "Columns we used: " }), used.length ? used : "none found", state.fileName ? H.el("span", { text: ` (${table.rows.length} rows, separator ${table.delimiter === "\t" ? "tab" : table.delimiter})` }) : null), details);
+  }
+
+  function rebuild(keepOpen = false) {
+    const { txs, skipped } = Parser.buildTransactions(state.table.rows, state.map, { flip: state.flip });
+    if (!txs.length) {
+      say("We could not find dates and amounts with these columns. Pick the date and amount columns below.", "danger");
+      renderColumns(true);
+      return;
+    }
+    state.txs = prepare(txs);
+    state.skipped = skipped;
+    state.example = false;
+    if (!keepOpen) state.overrides = new Map();
+    state.excluded = new Set();
+    state.showAll = false;
+    say(skipped ? `Read ${txs.length} payments. ${skipped} line${skipped === 1 ? "" : "s"} had no date or amount and were skipped.` : `Read ${txs.length} payments.`, "");
+    renderColumns(false);
+    $("source").textContent = state.fileName;
+    $("reset").hidden = false;
+    $("tips-out").replaceChildren();
+    tipsStatus("");
+    renderAll();
+  }
+
+  async function readFile(file) {
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) { say("That file is too large. Export a shorter period from your bank and try again.", "danger"); return; }
+    let text;
+    try {
+      const buf = await file.arrayBuffer();
+      try { text = new TextDecoder("utf-8", { fatal: true }).decode(buf); }
+      catch { text = new TextDecoder("windows-1252").decode(buf); }
+    } catch { say("We could not read that file. Try exporting it again.", "danger"); return; }
+    if (!text.trim()) { say("The file is empty. Export your statement again and choose CSV.", "danger"); return; }
+    state.fileName = file.name;
+    state.table = Parser.parseTable(text);
+    state.map = { ...state.table.map };
+    state.flip = false;
+    rebuild(false);
+  }
+
+  const drop = $("drop"), input = $("file");
+  drop.addEventListener("click", () => input.click());
+  drop.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); } });
+  input.addEventListener("change", () => { readFile(input.files[0]); input.value = ""; });
+  drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+  drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); readFile(e.dataTransfer.files[0]); });
+  $("form").addEventListener("submit", (e) => e.preventDefault());
+
+  function showExample() {
+    state.txs = exampleTxs(); state.example = true; state.fileName = ""; state.table = null; state.map = null; state.flip = false;
+    state.overrides = new Map(); state.excluded = new Set(); state.showAll = false;
+    say("");
+    renderColumns();
+    $("source").textContent = "Example data (made up)";
+    $("reset").hidden = true;
+    renderAll();
+    renderTips(EXAMPLE_TIPS, true);
+  }
+  $("reset").addEventListener("click", showExample);
+
+  showExample();
+})();
+</script>

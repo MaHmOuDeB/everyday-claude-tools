@@ -1,0 +1,341 @@
+<title>Say It Simply</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Understand a hard text in plain words, or turn a rough note into a clear message in another language.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&display=swap">
+<link rel="stylesheet" href="shared.css">
+<style>
+  /* Say It Simply: violet, the colour of a highlighter pen on a hard sentence. */
+  :root { --accent: #6d3fc0; --accent-ink: #ffffff; --accent-soft: #ece4f8; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --accent: #c3a4f2; --accent-ink: #1a1030; --accent-soft: #2e2244; } }
+  :root[data-theme="dark"] { --accent: #c3a4f2; --accent-ink: #1a1030; --accent-soft: #2e2244; }
+  .tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+  .simple-text { font: 600 1.55rem/1.45 var(--font-display); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .toggle { display: flex; align-items: center; gap: 10px; font-weight: 700; cursor: pointer; }
+  .toggle input { width: 1.2rem; height: 1.2rem; accent-color: var(--accent); }
+  .tag-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .piece { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+</style>
+
+<main class="page" id="main">
+  <header class="mast">
+    <p class="suite">Everyday Helpers</p>
+    <h1>Say It Simply</h1>
+    <p class="lead">Understand a hard text in plain words. Or write down what you want to say, in any language, and get a clear message you can send.</p>
+  </header>
+
+  <form class="sheet accented" id="form" novalidate>
+    <div class="tabs" role="group" aria-label="What do you want to do?">
+      <button type="button" class="chip on" aria-pressed="true" data-tab="understand">Understand a text</button>
+      <button type="button" class="chip" aria-pressed="false" data-tab="write">Write a message</button>
+    </div>
+
+    <div class="field" data-panel="understand">
+      <label for="source">The text</label>
+      <textarea id="source" rows="9" placeholder="Paste the text you do not understand: an email, a notice, terms, a medical letter."></textarea>
+    </div>
+
+    <div class="field" data-panel="write" hidden>
+      <label for="note">What do you want to say?</label>
+      <textarea id="note" rows="6" placeholder="Write it roughly, in any language. Short notes are fine."></textarea>
+    </div>
+
+    <div class="field" data-panel="understand">
+      <span class="label" id="level-label">How simple?</span>
+      <div class="chips" id="level" role="group" aria-labelledby="level-label"></div>
+    </div>
+
+    <div data-panel="write" hidden class="piece">
+      <div class="field">
+        <span class="label" id="to-label">Who is it for?</span>
+        <div class="chips" id="recipient" role="group" aria-labelledby="to-label"></div>
+      </div>
+      <div class="field">
+        <span class="label" id="tone-label">Tone</span>
+        <div class="chips" id="tone" role="group" aria-labelledby="tone-label"></div>
+      </div>
+      <label class="toggle"><input type="checkbox" id="subject-on" checked> Add a subject line (for emails)</label>
+    </div>
+
+    <div class="grid-2">
+      <div class="field" data-panel="write" hidden>
+        <label for="msg-language">Write the message in</label>
+        <select id="msg-language"></select>
+      </div>
+      <div class="field">
+        <label for="language" id="language-label">Explain it in</label>
+        <select id="language"></select>
+      </div>
+    </div>
+
+    <div class="row">
+      <button type="submit" class="btn primary" id="go">Make it simple</button>
+    </div>
+    <p class="privacy">Your text goes to Claude on your own account only when you press the button. Nothing is saved on a server. Do not paste ID or bank numbers.</p>
+  </form>
+
+  <div id="status" role="status" aria-live="polite"></div>
+  <section class="results" id="results" aria-label="Result"></section>
+  <p class="foot">Say It Simply helps you read and write. It is not a translator for legal or medical documents. For anything where a mistake costs a lot, ask a professional to check it.</p>
+</main>
+
+<script src="shared.js"></script>
+<script>
+(() => {
+  const H = window.Helpers;
+  const $ = (id) => document.getElementById(id);
+  const getLanguage = H.languagePicker($("language"));
+  let mode = "understand";
+  let controller = null;
+  const results = { understand: null, write: null };
+
+  const LEVELS = [["very simple", "Very simple"], ["simple", "Simple"], ["normal", "Normal"]];
+  const RECIPIENTS = [
+    ["an office or authority", "Office or authority"], ["a landlord", "Landlord"], ["an employer", "Employer"],
+    ["a teacher or school", "Teacher or school"], ["a doctor", "Doctor"], ["a friend", "Friend"],
+  ];
+  const TONES = [["polite", "Polite"], ["firm", "Firm"], ["friendly", "Friendly"]];
+
+  function chipGroup(box, items, initial) {
+    let value = initial;
+    const buttons = items.map(([v, label]) => {
+      const b = H.el("button", { type: "button", class: "chip", "aria-pressed": "false", text: label });
+      b.addEventListener("click", () => { value = v; paint(); });
+      return b;
+    });
+    const paint = () => buttons.forEach((b, i) => {
+      const on = items[i][0] === value;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-pressed", String(on));
+    });
+    box.replaceChildren(...buttons);
+    paint();
+    return () => value;
+  }
+  const getLevel = chipGroup($("level"), LEVELS, "simple");
+  const getRecipient = chipGroup($("recipient"), RECIPIENTS, "an office or authority");
+  const getTone = chipGroup($("tone"), TONES, "polite");
+
+  $("msg-language").replaceChildren(...H.LANGUAGES.map(([shown, english]) => H.el("option", { value: english, text: shown })));
+  $("msg-language").value = "German";
+
+  const shift = (days) => { const d = new Date(); d.setDate(d.getDate() + days); return d; };
+  const german = (d) => d.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" });
+  const english = (d) => d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+  const trip = shift(12), slip = shift(6);
+
+  const EXAMPLE_SOURCE = `Grundschule Musterstadt · Sekretariat · Schulweg 2 · 12345 Musterstadt
+
+Elternbrief Klasse 3b: Wandertag
+
+Liebe Eltern,
+
+die Klasse 3b unternimmt am ${german(trip)} einen Wandertag zum Musterwald. Wir treffen uns um 8:15 Uhr am Haupteingang und kehren gegen 13:00 Uhr zurück. Der reguläre Unterricht entfällt an diesem Tag.
+
+Bitte geben Sie Ihrem Kind wetterfeste Kleidung, festes Schuhwerk sowie ein Frühstück und ausreichend zu trinken mit. Süßigkeiten und elektronische Geräte sind nicht gestattet.
+
+Für Eintritt und Waldführung erheben wir einen Kostenbeitrag von 8,00 EUR pro Kind. Den Betrag bitten wir bis spätestens ${german(slip)} in einem verschlossenen Umschlag bei der Klassenlehrerin abzugeben. Die unterschriebene Einverständniserklärung ist ebenfalls bis zu diesem Termin vorzulegen; Kinder ohne Erklärung können leider nicht teilnehmen.
+
+Mit freundlichen Grüßen
+Frau Beispiel, Klassenlehrerin`;
+
+  const EXAMPLE_NOTE = "need to change my appointment next tuesday, I am sick. can i come another day? i am free thursday or friday morning";
+
+  const EXAMPLE_UNDERSTAND = {
+    simple: `Your child's class goes on a walk to the forest on ${english(trip)}. You must sign a permission slip and pay 8 euros by ${english(slip)}. Without the slip, your child cannot go.`,
+    points: [
+      `The day trip is on ${english(trip)}. There is no normal school that day.`,
+      "The class meets at 8:15 at the main entrance and is back at about 13:00.",
+      "Your child needs weatherproof clothes, strong shoes, breakfast and a drink. No sweets and no electronic devices.",
+      "The cost is 8.00 EUR per child, for the entrance and a guided tour.",
+    ],
+    asks_of_you: [
+      `Sign the permission slip and hand it in by ${english(slip)}.`,
+      `Put 8.00 EUR in a closed envelope and give it to the class teacher by ${english(slip)}.`,
+      "Pack the right clothes, shoes, food and drink on the morning of the trip.",
+    ],
+    words: [
+      { word: "Wandertag", meaning: "A day trip on foot, organised by the school." },
+      { word: "Kostenbeitrag", meaning: "The money you are asked to pay towards the cost." },
+      { word: "Einverständniserklärung", meaning: "A form where you say that your child may take part." },
+      { word: "Klassenlehrerin", meaning: "The teacher in charge of the class." },
+    ],
+  };
+
+  const EXAMPLE_WRITE = {
+    subject: "Terminverschiebung wegen Krankheit",
+    message: `Sehr geehrte Damen und Herren,
+
+ich habe nächsten Dienstag einen Termin bei Ihnen, bin aber leider krank und kann nicht kommen. Könnte ich den Termin auf Donnerstag oder Freitag vormittag verschieben?
+
+Bitte geben Sie mir kurz Bescheid, welcher Termin möglich ist.
+
+Vielen Dank und freundliche Grüße
+[Ihr Name]
+[Geburtsdatum oder Telefonnummer]`,
+    translation: `Dear Sir or Madam,
+
+I have an appointment with you next Tuesday, but I am sorry to say that I am ill and cannot come. Could I move the appointment to Thursday or Friday morning?
+
+Please let me know which appointment is possible.
+
+Thank you and kind regards
+[Your name]
+[Date of birth or phone number]`,
+  };
+
+  const LEVEL_RULES = {
+    "very simple": "Use the simplest words and very short sentences (under 10 words). One idea per sentence. No idioms. Explain or avoid every technical term. Like talking to someone who has only just started learning the language.",
+    simple: "Use everyday words and short sentences. Keep important terms, but explain them in a few words the first time.",
+    normal: "Use clear, plain language with normal sentences. Remove jargon and padding, but keep the full detail.",
+  };
+
+  function buildPrompt(kind, s) {
+    if (kind === "write") {
+      return [
+        "You help a person write a clear message. They describe what they want to say, roughly and maybe in another language.",
+        `Write the message in ${s.messageLanguage}, for ${s.recipient}. Tone: ${s.tone}.`,
+        `Use the greeting and closing that fit ${s.messageLanguage} and this reader. Keep it short and direct. Use only the facts in the person's note; never invent dates, names, numbers or reasons.`,
+        "Put [square brackets] where personal details are needed that the note does not give (name, date of birth, customer number).",
+        s.subject ? "Also write a short, clear subject line for an email." : 'The person does not need a subject line: set "subject" to an empty string.',
+        `Then translate the message into ${s.language}, so the person knows exactly what it says. If ${s.language} is the same language as the message, repeat the message.`,
+        "",
+        "Reply with only one JSON object in this shape:",
+        `{"subject": "", "message": "the message ready to send, with line breaks as \\n", "translation": "the message in ${s.language}"}`,
+        "",
+        "What the person wants to say:",
+        s.text,
+      ].join("\n");
+    }
+    return [
+      "You help a person understand a text that is hard for them to read.",
+      `Write every answer in ${s.language}.`,
+      `Level: ${s.level}. ${LEVEL_RULES[s.level] || LEVEL_RULES.simple}`,
+      "Stay true to the text. Never add facts, dates, amounts or consequences that the text does not contain. If something is unclear in the text, say that it is unclear.",
+      "Keep names, dates and amounts exactly as written.",
+      "",
+      "Reply with only one JSON object in this shape:",
+      `{"simple": "the whole text rewritten at this level", "points": ["the main points, 3 to 6 short items"], "asks_of_you": ["what the reader has to do or decide, with dates; empty list if nothing"], "words": [{"word": "hard word from the text", "meaning": "what it means, plainly"}]}`,
+      "",
+      "The text:",
+      s.text,
+    ].join("\n");
+  }
+
+  const filled = (arr) => Array.isArray(arr) ? arr.filter((x) => x && (typeof x === "string" ? x.trim() : true)) : [];
+  const str = (v) => (typeof v === "string" ? v : "");
+  const section = (title, ...children) => H.el("section", { class: "sheet" }, H.el("h2", { text: title }), ...children);
+  const list = (items) => H.el("ul", { class: "plain-list", dir: "auto" }, items.map((t) => H.el("li", { text: t })));
+
+  function copyBlock(label, text, lang) {
+    const b = H.el("button", { type: "button", class: "btn small", text: "Copy" });
+    b.addEventListener("click", () => H.copy(text, b));
+    return H.el("div", { class: "piece" }, H.el("h3", { text: label }), H.el("div", { class: "quote", dir: "auto", lang: lang || null, text }), H.el("div", { class: "row" }, b));
+  }
+
+  function renderUnderstand(data, example) {
+    const out = [];
+    const simple = str(data.simple);
+    out.push(H.el("section", { class: "sheet accented" },
+      H.el("div", { class: "tag-row" }, example ? H.el("span", { class: "tag example", text: "Example" }) : null, H.el("span", { class: "tag", text: "In plain words" })),
+      H.el("p", { class: "simple-text", dir: "auto", text: simple || "No simple version came back. Try again." }),
+      simple ? H.el("div", { class: "row" }, (() => { const b = H.el("button", { type: "button", class: "btn small", text: "Copy" }); b.addEventListener("click", () => H.copy(simple, b)); return b; })()) : null));
+    const points = filled(data.points).map(String);
+    if (points.length) out.push(section("The main points", list(points)));
+    const asks = filled(data.asks_of_you).map(String);
+    out.push(section("What it asks of you", asks.length ? list(asks) : H.el("p", { text: "Nothing. This text only gives information." })));
+    const words = filled(data.words).filter((w) => typeof w === "object");
+    if (words.length) out.push(section("Words explained", H.el("dl", { class: "kv", dir: "auto" }, words.flatMap((w) => [H.el("dt", { text: str(w.word) }), H.el("dd", { text: str(w.meaning) })]))));
+    $("results").replaceChildren(...out);
+  }
+
+  function renderWrite(data, example) {
+    const subject = str(data.subject).trim();
+    const message = str(data.message);
+    const translation = str(data.translation);
+    const out = [];
+    out.push(H.el("section", { class: "sheet accented" },
+      H.el("div", { class: "tag-row" }, example ? H.el("span", { class: "tag example", text: "Example" }) : null, H.el("span", { class: "tag", text: "Ready to send" })),
+      H.el("p", { class: "hint", text: "Fill in the parts in [brackets] before you send it." }),
+      subject ? copyBlock("Subject", subject) : null,
+      message ? copyBlock("Message", message) : H.el("p", { class: "notice warn", text: "No message came back. Try again." })));
+    if (translation) out.push(section("What it says", H.el("p", { class: "hint", text: "This is only for you, so you know what you are sending." }), copyBlock("Translation", translation)));
+    $("results").replaceChildren(...out);
+  }
+
+  function renderMode() {
+    const r = results[mode];
+    const data = r || (mode === "write" ? EXAMPLE_WRITE : EXAMPLE_UNDERSTAND);
+    (mode === "write" ? renderWrite : renderUnderstand)(data, !r);
+  }
+
+  function setMode(next) {
+    mode = next;
+    for (const b of document.querySelectorAll("[data-tab]")) {
+      const on = b.dataset.tab === next;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-pressed", String(on));
+    }
+    for (const p of document.querySelectorAll("[data-panel]")) p.hidden = p.dataset.panel !== next;
+    $("language-label").textContent = next === "write" ? "Translation in" : "Explain it in";
+    if (!copyMode) $("go").textContent = label();
+    say("");
+    renderMode();
+  }
+  for (const b of document.querySelectorAll("[data-tab]")) b.addEventListener("click", () => setMode(b.dataset.tab));
+
+  let copyMode = false;
+  const label = () => (mode === "write" ? "Write my message" : "Make it simple");
+
+  function state() {
+    return {
+      text: (mode === "write" ? $("note") : $("source")).value.trim(),
+      language: getLanguage(), level: getLevel(), recipient: getRecipient(), tone: getTone(),
+      messageLanguage: $("msg-language").value, subject: $("subject-on").checked,
+    };
+  }
+
+  function say(message, kind = "") {
+    $("status").replaceChildren(message ? H.el("p", { class: kind === "thinking" ? "thinking" : `notice ${kind}`, text: message }) : "");
+  }
+
+  async function run() {
+    const s = state();
+    const m = mode;
+    if (!s.text) { say(m === "write" ? "Write what you want to say first." : "Paste the text first.", "warn"); return; }
+    controller?.abort();
+    controller = new AbortController();
+    const go = $("go");
+    go.disabled = true;
+    $("results").setAttribute("aria-busy", "true");
+    say(m === "write" ? "Writing your message. This usually takes 10 to 30 seconds." : "Reading your text. This usually takes 10 to 30 seconds.", "thinking");
+    try {
+      const data = await H.askJSON(buildPrompt(m, s), { signal: controller.signal });
+      if (!data || typeof data !== "object") throw { code: "invalid_json" };
+      results[m] = data;
+      if (mode === m) { renderMode(); say(""); $("results").querySelector("h2, .simple-text, .piece")?.scrollIntoView({ behavior: "smooth", block: "start" }); }
+    } catch (error) {
+      if (error?.code !== "cancelled") say(H.errorText(error), "danger");
+      if (!(await H.live())) { copyMode = true; go.textContent = "Copy as prompt"; }
+    } finally {
+      go.disabled = false;
+      $("results").removeAttribute("aria-busy");
+    }
+  }
+
+  function showPrompt() {
+    const s = state();
+    if (!s.text) { say(mode === "write" ? "Write what you want to say first. Then the prompt includes it." : "Paste the text first. Then the prompt includes it.", "warn"); return; }
+    say("");
+    $("results").replaceChildren(H.promptPanel(buildPrompt(mode, s)));
+  }
+
+  $("form").addEventListener("submit", (e) => e.preventDefault());
+  H.wireMainButton({ button: $("go"), liveLabel: "Make it simple", onLive: run, onCopy: showPrompt }).then((isLive) => { copyMode = !isLive; });
+
+  $("source").value = EXAMPLE_SOURCE;
+  $("note").value = EXAMPLE_NOTE;
+  renderMode();
+})();
+</script>

@@ -1,0 +1,376 @@
+<title>Decision Helper</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Work through a hard choice: answer a few good questions, compare your options and see what would change the answer.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&display=swap">
+<link rel="stylesheet" href="shared.css">
+<style>
+  /* Decision Helper: indigo, the colour of a late-night think. */
+  :root { --accent: #3f45b5; --accent-ink: #ffffff; --accent-soft: #e4e5f7; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --accent: #a5a9f2; --accent-ink: #14152b; --accent-soft: #25274a; } }
+  :root[data-theme="dark"] { --accent: #a5a9f2; --accent-ink: #14152b; --accent-soft: #25274a; }
+  .opt-row { display: flex; gap: 8px; align-items: center; }
+  .opt-row input { flex: 1; }
+  .qa { display: flex; flex-direction: column; gap: 6px; }
+  .qa textarea { min-height: 5rem; }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+  table.matrix { border-collapse: collapse; width: 100%; min-width: 28rem; }
+  .matrix th, .matrix td { padding: 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+  .matrix thead th { background: var(--accent-soft); position: sticky; top: 0; }
+  .matrix tbody tr:last-child th, .matrix tbody tr:last-child td { border-bottom: 0; }
+  .matrix th[scope="row"] { min-width: 11rem; font-weight: 400; }
+  .crit-name { font-weight: 700; display: block; }
+  .slider { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .slider input[type="range"] { flex: 1; min-width: 5rem; accent-color: var(--accent); }
+  .slider output { font-weight: 700; min-width: 1.2rem; text-align: right; font-variant-numeric: tabular-nums; }
+  .cell { border-radius: 8px; padding: 4px 6px; margin: -4px -6px; }
+  .cell:focus-visible, .cell:hover { background: var(--accent-soft); }
+  .cell .score { font: 700 1.25rem/1.2 var(--font-display); font-variant-numeric: tabular-nums; }
+  .cell-why { display: none; font-size: 0.85rem; color: var(--ink-2); margin-top: 4px; }
+  @media (max-width: 40rem) { .cell-why { display: block; } }
+  .totals { display: flex; flex-direction: column; gap: 14px; }
+  .total { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; padding: 12px; border: 1.5px solid var(--line); border-radius: 12px; }
+  .total.leading { border-color: var(--accent); background: var(--accent-soft); }
+  .total .name { font-weight: 700; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; overflow-wrap: anywhere; }
+  .total .pct { font: 700 1.3rem/1.2 var(--font-display); font-variant-numeric: tabular-nums; }
+  .bar { grid-column: 1 / -1; height: 12px; border-radius: 999px; background: var(--paper); border: 1px solid var(--line); overflow: hidden; }
+  .bar > span { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width 0.15s; }
+  @media (prefers-reduced-motion: reduce) { .bar > span { transition: none; } }
+</style>
+
+<main class="page" id="main">
+  <header class="mast">
+    <p class="suite">Everyday Helpers</p>
+    <h1>Decision Helper</h1>
+    <p class="lead">Stuck between two or more choices? Answer a few good questions, then see your options side by side.</p>
+  </header>
+
+  <form class="sheet accented" id="form" novalidate>
+    <h2>Step 1: What are you deciding?</h2>
+    <div class="field">
+      <label for="decision">Your decision</label>
+      <textarea id="decision" rows="3" placeholder="For example: should I move to a new city for a job?"></textarea>
+    </div>
+    <div class="field">
+      <span class="label" id="opt-label">Your options (2 to 4)</span>
+      <div id="options" role="group" aria-labelledby="opt-label" style="display:flex;flex-direction:column;gap:8px"></div>
+      <div class="row"><button type="button" class="btn small" id="add-opt">Add option</button></div>
+    </div>
+    <div class="field">
+      <label for="language">Answer in</label>
+      <select id="language"></select>
+    </div>
+    <div class="row">
+      <button type="submit" class="btn primary" id="go">Ask me the right questions</button>
+    </div>
+    <p class="privacy">What you write goes to Claude on your own account only when you press a button. Nothing is saved on a server.</p>
+  </form>
+
+  <div id="status" role="status" aria-live="polite"></div>
+  <section class="results" id="results" aria-label="Your decision"></section>
+  <p class="foot">Decision Helper is a way to think, not a verdict. The scores are Claude's guesses from what you wrote. For big choices about money, health or the law, talk to someone who knows your situation.</p>
+</main>
+
+<script src="shared.js"></script>
+<script>
+(() => {
+  const H = window.Helpers;
+  const $ = (id) => document.getElementById(id);
+  const getLanguage = H.languagePicker($("language"));
+  let controller = null;
+  let step2 = null; // { node, questions }
+
+  // DATA-START
+  /** Weighted total per option as a percentage: sum(score*weight) / sum(5*weight) * 100. */
+  function totals(options, criteria, scores, weights) {
+    return options.map((option) => {
+      let got = 0, max = 0;
+      criteria.forEach((c, i) => {
+        const hit = scores.find((s) => s && s.option === option && s.criterion === c.name);
+        const n = hit ? Number(hit.score) : NaN;
+        if (!Number.isFinite(n)) return;
+        const w = Number(weights[i]) || 0;
+        got += Math.min(5, Math.max(1, n)) * w;
+        max += 5 * w;
+      });
+      return { option, pct: max ? (got / max) * 100 : 0 };
+    });
+  }
+
+  const EXAMPLE_DECISION = "Take a job offer in Hamburg or stay in my current job in Berlin";
+  const EXAMPLE_OPTIONS = ["Take the job in Hamburg", "Stay in my job in Berlin"];
+  const EXAMPLE_QA = [
+    { id: "q1", question: "What matters most to you in the next two years: money, learning or time with people?", why: "The answer decides how much each factor should count.", answer: "Learning and a better salary. I have been at the same level for three years." },
+    { id: "q2", question: "Who would you leave behind in Berlin, and how often would you see them?", why: "Distance to people you love is often the hidden cost of a move.", answer: "My partner works in Berlin and stays. Friends too. I could come back about every other weekend." },
+    { id: "q3", question: "How much more would you earn in Hamburg after rent?", why: "A higher salary can disappear into higher rent.", answer: "About 9,000 euros more per year before tax. Rent is maybe 200 euros more per month." },
+    { id: "q4", question: "Could you reverse the decision if it goes wrong?", why: "A choice you can undo is less risky.", answer: "Probably yes. The Hamburg contract has a six-month trial period, and Berlin has jobs like mine." },
+  ];
+  const EXAMPLE_RESULT = {
+    criteria: [
+      { name: "Salary after rent", weight: 4, why: "You said a better salary matters, but rent is higher in Hamburg." },
+      { name: "Learning and career growth", weight: 5, why: "You have been at the same level for three years." },
+      { name: "Time with partner and friends", weight: 5, why: "Your partner and friends stay in Berlin." },
+      { name: "Risk and ability to reverse", weight: 3, why: "Both are fairly safe, but a new job has a trial period." },
+    ],
+    scores: [
+      { option: "Take the job in Hamburg", criterion: "Salary after rent", score: 4, reason: "About 9,000 euros more per year, minus about 2,400 for rent." },
+      { option: "Take the job in Hamburg", criterion: "Learning and career growth", score: 5, reason: "A bigger role and a new team to learn from." },
+      { option: "Take the job in Hamburg", criterion: "Time with partner and friends", score: 3, reason: "About every other weekend in person, and calls in between." },
+      { option: "Take the job in Hamburg", criterion: "Risk and ability to reverse", score: 3, reason: "Six-month trial period, but you could look for work in Berlin again." },
+      { option: "Stay in my job in Berlin", criterion: "Salary after rent", score: 3, reason: "Lower pay, but you keep your current rent." },
+      { option: "Stay in my job in Berlin", criterion: "Learning and career growth", score: 2, reason: "Same level for three years, with no promotion in sight." },
+      { option: "Stay in my job in Berlin", criterion: "Time with partner and friends", score: 5, reason: "Everyone you care about is in the same city." },
+      { option: "Stay in my job in Berlin", criterion: "Risk and ability to reverse", score: 4, reason: "Nothing changes, so little can go wrong." },
+    ],
+    change_mind: [
+      "If your partner could move to Hamburg within a year, the Hamburg option would get much stronger.",
+      "If your employer offered a real promotion or a raise in Berlin, staying would look better.",
+      "If the Hamburg rent turns out to be much higher than 200 euros more per month, the salary gain disappears.",
+    ],
+    regret: "In five years, which would you regret not trying? From your answers, not trying the bigger role seems the more likely regret, as long as the distance to your partner is something you both can live with.",
+    next_step: "Ask the Hamburg employer if you can work from Berlin one or two days a week, and talk to your partner about how often you would both want to visit.",
+  };
+  // DATA-END
+
+  const str = (v) => (typeof v === "string" ? v : "");
+  const filled = (arr) => Array.isArray(arr) ? arr.filter((x) => typeof x === "string" && x.trim()) : [];
+
+  /* Options inputs */
+  function optionInputs() { return [...$("options").querySelectorAll("input")]; }
+  function drawOptionRows() {
+    const rows = [...$("options").children];
+    rows.forEach((row, i) => {
+      row.querySelector("input").setAttribute("aria-label", `Option ${i + 1}`);
+      row.querySelector("button").disabled = rows.length <= 2;
+    });
+    $("add-opt").disabled = rows.length >= 4;
+  }
+  function addOption(value = "") {
+    const input = H.el("input", { type: "text", placeholder: "An option", autocomplete: "off" });
+    input.value = value;
+    const remove = H.el("button", { type: "button", class: "btn small quiet", text: "Remove" });
+    const row = H.el("div", { class: "opt-row" }, input, remove);
+    remove.addEventListener("click", () => { row.remove(); drawOptionRows(); });
+    $("options").append(row);
+    drawOptionRows();
+    return input;
+  }
+  $("add-opt").addEventListener("click", () => addOption().focus());
+
+  function state() {
+    const names = [];
+    for (const input of optionInputs()) {
+      let name = input.value.trim();
+      if (!name) continue;
+      let n = 2, base = name;
+      while (names.includes(name)) name = `${base} (${n++})`;
+      names.push(name);
+    }
+    return { decision: $("decision").value.trim(), options: names, language: getLanguage() };
+  }
+
+  const shape = (qa) => qa.map((q) => `Question: ${q.question}\nAnswer: ${(q.answer || "").trim() || "(no answer)"}`).join("\n\n");
+
+  function buildPrompt(kind, s, qa) {
+    const head = [
+      "You help a person think through a decision. You are a calm thinking partner, not a judge. You do not decide for them.",
+      `Write everything in ${s.language}, in short, plain sentences.`,
+      "",
+      `The decision: ${s.decision}`,
+      "The options:",
+      ...s.options.map((o, i) => `${i + 1}. ${o}`),
+    ];
+    if (kind === "questions") {
+      return [...head, "",
+        "Ask up to 5 short questions that really matter for this choice: things only the person knows, such as what they value, limits, money, people, and whether it can be undone. Do not ask what is already stated above. Add one short sentence on why each question matters.",
+        "",
+        "Reply with only one JSON object in this shape:",
+        `{"questions": [{"id": "q1", "question": "", "why": ""}]}`,
+      ].join("\n");
+    }
+    const compareSpec = [
+      "Choose 4 to 6 criteria that matter for this person and this choice, based on their answers. Give each a weight from 1 (minor) to 5 (very important) and a one-sentence reason.",
+      "Score every option on every criterion from 1 (poor) to 5 (excellent for this person), with a one-sentence reason that uses their answers. Use the option names exactly as written above. Never invent facts the person did not give; where you guess, say so in the reason.",
+      "Also give: what would change the answer (2 to 4 short items), the regret test (one short paragraph: in five years, which option would they regret not trying, and why), and the smallest next step for the leading option.",
+    ];
+    if (kind === "compare") {
+      return [...head, "", "The person's answers to your questions:", shape(qa), "", ...compareSpec, "",
+        "Reply with only one JSON object in this shape:",
+        `{"criteria": [{"name": "", "weight": 3, "why": ""}], "scores": [{"option": "", "criterion": "", "score": 3, "reason": ""}], "change_mind": [""], "regret": "", "next_step": ""}`,
+      ].join("\n");
+    }
+    return [...head, "",
+      "First, ask me up to 5 short questions that really matter for this choice (what I value, limits, money, people, whether it can be undone), all in one message. Add one short sentence on why each matters. Then wait for my answers.",
+      "After I answer:", ...compareSpec.map((l) => "- " + l),
+      "Show the scores as a table with options as columns and criteria as rows, then add a weighted total per option as a percentage: sum(score x weight) / sum(5 x weight) x 100.",
+    ].join("\n");
+  }
+
+  function say(message, kind = "") {
+    $("status").replaceChildren(message ? H.el("p", { class: kind === "thinking" ? "thinking" : `notice ${kind}`, text: message }) : "");
+  }
+  const section = (title, ...children) => H.el("section", { class: "sheet" }, H.el("h2", { text: title }), ...children);
+
+  /* Step 2 */
+  function buildStep2(questions, example) {
+    const boxes = questions.map((q, i) => {
+      const id = `ans-${i}`;
+      const area = H.el("textarea", { id, rows: "3", placeholder: "Your answer, in your own words. Short is fine.", dir: "auto" });
+      area.value = q.answer || "";
+      return { q, area, node: H.el("div", { class: "qa" },
+        H.el("label", { for: id, dir: "auto", text: `${i + 1}. ${q.question}` }),
+        q.why ? H.el("p", { class: "hint", dir: "auto", text: q.why }) : null, area) };
+    });
+    const button = H.el("button", { type: "button", class: "btn primary", text: "Compare my options" });
+    button.addEventListener("click", () => compare());
+    const node = H.el("section", { class: "sheet", "aria-label": "Questions" },
+      H.el("div", { class: "row" }, H.el("h2", { text: "Step 2: A few questions" }), example ? H.el("span", { class: "tag example", text: "Example" }) : null),
+      ...boxes.map((b) => b.node),
+      H.el("div", { class: "row" }, button),
+      H.el("p", { class: "hint", text: "You can leave a question empty. Honest answers give better scores." }));
+    return { node, button, questions: boxes.map((b) => ({ ...b.q, get answer() { return b.area.value; } })) };
+  }
+
+  function validQuestions(data) {
+    const list = Array.isArray(data?.questions) ? data.questions : [];
+    return list.filter((q) => q && typeof q.question === "string" && q.question.trim()).slice(0, 5)
+      .map((q, i) => ({ id: str(q.id) || `q${i + 1}`, question: q.question.trim(), why: str(q.why) }));
+  }
+
+  /* Step 3 */
+  function renderStep3(data, options, example) {
+    const criteria = (Array.isArray(data.criteria) ? data.criteria : [])
+      .filter((c) => c && typeof c.name === "string" && c.name.trim())
+      .map((c) => ({ name: c.name.trim(), weight: Math.min(5, Math.max(1, Math.round(Number(c.weight)) || 3)), why: str(c.why) }));
+    const scores = (Array.isArray(data.scores) ? data.scores : []).filter((s) => s && typeof s.option === "string" && typeof s.criterion === "string");
+    const weights = criteria.map((c) => c.weight);
+    const find = (o, c) => scores.find((s) => s.option === o && s.criterion === c.name);
+
+    const rows = criteria.map((c, i) => {
+      const out = H.el("output", { text: String(c.weight) });
+      const range = H.el("input", { type: "range", min: "1", max: "5", step: "1", value: String(c.weight), "aria-label": `Weight for ${c.name}` });
+      range.addEventListener("input", () => { weights[i] = Number(range.value); out.textContent = range.value; update(); });
+      return H.el("tr", {},
+        H.el("th", { scope: "row", dir: "auto" },
+          H.el("span", { class: "crit-name", text: c.name }),
+          c.why ? H.el("span", { class: "hint", text: c.why }) : null,
+          H.el("label", { class: "slider" }, H.el("span", { class: "hint", text: "Weight" }), range, out)),
+        ...options.map((o) => {
+          const hit = find(o, c);
+          const n = hit ? Number(hit.score) : NaN;
+          const reason = hit ? str(hit.reason) : "";
+          return H.el("td", {}, H.el("div", { class: "cell", tabindex: "0", title: reason || null, dir: "auto" },
+            H.el("span", { class: "score", text: Number.isFinite(n) ? `${Math.min(5, Math.max(1, Math.round(n)))} / 5` : "–" }),
+            reason ? H.el("div", { class: "cell-why", text: reason }) : null));
+        }));
+    });
+    const table = H.el("table", { class: "matrix" },
+      H.el("caption", { class: "hint", style: "text-align:left;padding:0 0 8px", text: "Scores from 1 (poor) to 5 (excellent). Move a weight slider to change how much a criterion counts. Hover or focus a score to see why." }),
+      H.el("thead", {}, H.el("tr", {}, H.el("th", { scope: "col", text: "Criterion" }), ...options.map((o) => H.el("th", { scope: "col", dir: "auto", text: o })))),
+      H.el("tbody", {}, rows));
+
+    const totalsBox = H.el("div", { class: "totals" });
+    const verdict = H.el("p", { class: "notice", "aria-live": "polite" });
+    function update() {
+      const t = totals(options, criteria, scores, weights);
+      const top = Math.max(...t.map((x) => x.pct));
+      const leaders = t.filter((x) => x.pct >= top - 0.05);
+      const clear = leaders.length === 1 && t.every((x) => x === leaders[0] || leaders[0].pct - x.pct >= 3);
+      totalsBox.replaceChildren(...t.map((x) => {
+        const lead = clear && x === leaders[0];
+        return H.el("div", { class: "total" + (lead ? " leading" : "") },
+          H.el("span", { class: "name", dir: "auto" }, x.option, lead ? H.el("span", { class: "tag", text: "Leading" }) : null),
+          H.el("span", { class: "pct", text: `${Math.round(x.pct)}%` }),
+          H.el("div", { class: "bar", role: "img", "aria-label": `${x.option}: ${Math.round(x.pct)} percent` }, H.el("span", { style: `width:${x.pct.toFixed(1)}%` })));
+      }));
+      verdict.textContent = !criteria.length ? "" : clear
+        ? `Leading with your weights: ${leaders[0].option}.`
+        : "Too close to call with these weights. The questions below may help more than the numbers.";
+    }
+    update();
+
+    const out = [];
+    out.push(H.el("section", { class: "sheet accented" },
+      H.el("div", { class: "row" }, H.el("h2", { text: "Step 3: Your options side by side" }), example ? H.el("span", { class: "tag example", text: "Example" }) : null),
+      criteria.length ? H.el("div", { class: "table-wrap" }, table) : H.el("p", { class: "notice warn", text: "No criteria came back. Try again." }),
+      H.el("h3", { text: "Weighted totals" }), totalsBox, verdict));
+    const change = filled(data.change_mind);
+    if (change.length) out.push(section("What would change this", H.el("ul", { class: "plain-list", dir: "auto" }, change.map((t) => H.el("li", { text: t })))));
+    if (str(data.regret).trim()) out.push(section("The regret test", H.el("p", { dir: "auto", text: data.regret })));
+    if (str(data.next_step).trim()) out.push(section("Smallest next step", H.el("p", { class: "big-line", dir: "auto", text: data.next_step })));
+    return out;
+  }
+
+  function showResults(...nodes) { $("results").replaceChildren(...nodes.flat()); }
+
+  /* Actions */
+  async function guarded(button, working, task) {
+    controller?.abort();
+    controller = new AbortController();
+    button.disabled = true;
+    $("results").setAttribute("aria-busy", "true");
+    say(working, "thinking");
+    try { await task(controller.signal); }
+    finally { button.disabled = false; $("results").removeAttribute("aria-busy"); }
+  }
+
+  function check(s) {
+    if (!s.decision) { say("Write what you are deciding first.", "warn"); return false; }
+    if (s.options.length < 2) { say("Add at least two options.", "warn"); return false; }
+    return true;
+  }
+
+  async function askQuestions() {
+    const s = state();
+    if (!check(s)) return;
+    await guarded($("go"), "Thinking about the right questions. This usually takes 10 to 30 seconds.", async (signal) => {
+      try {
+        const questions = validQuestions(await H.askJSON(buildPrompt("questions", s), { signal }));
+        if (!questions.length) throw { code: "invalid_json" };
+        step2 = buildStep2(questions, false);
+        showResults(step2.node);
+        say("");
+        step2.node.scrollIntoView({ behavior: "smooth", block: "start" });
+      } catch (error) {
+        if (error?.code !== "cancelled") say(H.errorText(error), "danger");
+        if (!(await H.live())) $("go").textContent = "Copy as prompt";
+      }
+    });
+  }
+
+  async function compare() {
+    const s = state();
+    if (!check(s) || !step2) return;
+    const qa = step2.questions.map((q) => ({ question: q.question, answer: q.answer }));
+    if (!(await H.live())) { showResults(step2.node, H.promptPanel(buildPrompt("compare", s, qa))); return; }
+    await guarded(step2.button, "Comparing your options. This usually takes 20 to 50 seconds.", async (signal) => {
+      try {
+        const data = await H.askJSON(buildPrompt("compare", s, qa), { signal });
+        if (!data || typeof data !== "object" || !Array.isArray(data.criteria) || !data.criteria.length) throw { code: "invalid_json" };
+        showResults(step2.node, renderStep3(data, s.options, false));
+        say("");
+        $("results").querySelectorAll("section")[1]?.scrollIntoView({ behavior: "smooth", block: "start" });
+      } catch (error) {
+        if (error?.code !== "cancelled") say(H.errorText(error), "danger");
+        if (!(await H.live())) showResults(step2.node, H.promptPanel(buildPrompt("compare", s, qa)));
+      }
+    });
+  }
+
+  function showPrompt() {
+    const s = state();
+    if (!check(s)) return;
+    say("");
+    showResults(H.promptPanel(buildPrompt("combined", s), "This copy of the page cannot reach Claude directly, so one prompt does all the steps. Paste it into a new chat on claude.ai. Claude asks you the questions there, you answer in the chat, and then it compares your options."));
+  }
+
+  $("form").addEventListener("submit", (e) => e.preventDefault());
+  H.wireMainButton({ button: $("go"), liveLabel: "Ask me the right questions", onLive: askQuestions, onCopy: showPrompt });
+
+  $("decision").value = EXAMPLE_DECISION;
+  EXAMPLE_OPTIONS.forEach((o) => addOption(o));
+  step2 = buildStep2(EXAMPLE_QA, true);
+  showResults(step2.node, renderStep3(EXAMPLE_RESULT, EXAMPLE_OPTIONS, true));
+})();
+</script>

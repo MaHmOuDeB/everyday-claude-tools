@@ -1,0 +1,428 @@
+<title>Contract Checker</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Understand a contract or bill: the price, the minimum term, the notice period and the last day you can cancel.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&display=swap">
+<link rel="stylesheet" href="shared.css">
+<style>
+  /* Contract Checker: amber, the colour of a highlighter on the small print. */
+  :root { --accent: #a15c00; --accent-ink: #ffffff; --accent-soft: #fbeccf; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --accent: #f0b64a; --accent-ink: #261a00; --accent-soft: #3a2a0c; } }
+  :root[data-theme="dark"] { --accent: #f0b64a; --accent-ink: #261a00; --accent-soft: #3a2a0c; }
+  .tabs { display: flex; gap: 8px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .cancel-by { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; }
+  .cancel-by .when { font: 700 1.6rem/1.2 var(--font-display); font-variant-numeric: tabular-nums; }
+  .working { margin: 0; padding: 12px 14px; border-left: 4px solid var(--accent); background: var(--paper); border-radius: 0 10px 10px 0; overflow-wrap: anywhere; }
+  .reply-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 16px; }
+  .reply-pair > div { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .missing-list { margin: 0; padding-left: 1.3rem; display: flex; flex-direction: column; gap: 4px; }
+</style>
+
+<main class="page" id="main">
+  <header class="mast">
+    <p class="suite">Everyday Helpers</p>
+    <h1>Contract Checker</h1>
+    <p class="lead">Phone, internet, energy, gym or insurance contract? Find out what you pay, how long you are bound and the last day you can cancel.</p>
+  </header>
+
+  <form class="sheet accented" id="form" novalidate>
+    <div class="tabs" role="group" aria-label="How to add the contract">
+      <button type="button" class="chip on" aria-pressed="true" data-tab="text">Paste the text</button>
+      <button type="button" class="chip" aria-pressed="false" data-tab="photo" id="photo-tab">Add photos</button>
+    </div>
+    <div class="field" data-panel="text">
+      <label for="contract">The contract or bill</label>
+      <textarea id="contract" rows="10" placeholder="Paste the contract, the order confirmation or a bill here."></textarea>
+    </div>
+    <div class="field" data-panel="photo" hidden>
+      <span class="label">Photos of the pages</span>
+      <div class="drop" id="drop" tabindex="0" role="button" aria-describedby="drop-hint">Tap to add photos, or drop them here</div>
+      <input type="file" id="photos" accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden>
+      <div class="thumbs" id="thumbs"></div>
+      <p class="hint" id="drop-hint">Up to 4 pages. Cover account numbers, IBANs and ID numbers before you take the photo.</p>
+    </div>
+    <div class="grid-2">
+      <div class="field">
+        <label for="country">Where the contract is from</label>
+        <input type="text" id="country" value="Germany" autocomplete="country-name">
+      </div>
+      <div class="field">
+        <label for="started">The contract started on (optional)</label>
+        <input type="date" id="started">
+        <p class="hint">If you know it, we use your date and not the one in the text.</p>
+      </div>
+      <div class="field">
+        <label for="language">Explain it in</label>
+        <select id="language"></select>
+      </div>
+    </div>
+    <div class="row">
+      <button type="submit" class="btn primary" id="go">Check my contract</button>
+    </div>
+    <p class="privacy">Your contract goes to Claude on your own account only when you press the button. Nothing is saved on a server.</p>
+  </form>
+
+  <div id="status" role="status" aria-live="polite"></div>
+  <section class="results" id="results" aria-label="Contract check"></section>
+  <p class="foot">Contract Checker explains contracts. It cannot give legal advice, and dates it works out can be wrong if the contract has special rules. Check the date with the provider before you rely on it. For a big sum or a dispute, ask a lawyer or a consumer advice centre.</p>
+</main>
+
+<script src="shared.js"></script>
+<script>
+(() => {
+  const H = window.Helpers;
+  const $ = (id) => document.getElementById(id);
+  const getLanguage = H.languagePicker($("language"));
+  const photos = H.photoPicker($("drop"), $("photos"), $("thumbs"), 4);
+  let tab = "text";
+  let controller = null;
+
+  // <cancel-by>
+  /* Pure date logic: no page, no Claude. All dates are ISO strings (YYYY-MM-DD). */
+  function computeCancelBy({ start, termMonths, notice, renewal, today }) {
+    const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const parse = (iso) => {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+      if (!m) return null;
+      const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      return d.getMonth() === Number(m[2]) - 1 ? d : null;
+    };
+    const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const fmt = (d) => `${d.getDate()} ${MON[d.getMonth()]} ${d.getFullYear()}`;
+    const eom = (d) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    const isEom = (d) => d.getDate() === eom(d).getDate();
+    const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+    const addMonths = (d, n) => {
+      const first = new Date(d.getFullYear(), d.getMonth() + n, 1);
+      return new Date(first.getFullYear(), first.getMonth(), Math.min(d.getDate(), eom(first).getDate()));
+    };
+    const noticeWords = (n) => `${n.amount} ${n.unit.replace(/s$/, "")}${n.amount === 1 ? "" : "s"}`;
+    const minusNotice = (d) => {
+      if (notice.unit === "months") { const t = addMonths(d, -notice.amount); return isEom(d) ? eom(t) : t; }
+      return addDays(d, -notice.amount * (notice.unit === "weeks" ? 7 : 1));
+    };
+
+    const startDate = parse(start);
+    const todayDate = parse(today);
+    const missing = [];
+    if (!startDate) missing.push("the date the contract started (type it in the box above)");
+    if (typeof termMonths !== "number" || !isFinite(termMonths) || termMonths < 0) missing.push("the minimum term");
+    const noticeOk = notice && typeof notice.amount === "number" && isFinite(notice.amount) && notice.amount >= 0 && ["days", "weeks", "months"].includes(notice.unit);
+    if (!noticeOk) missing.push("the notice period");
+    if (missing.length || !todayDate) return { status: "missing", missing, working: "", notes: [] };
+
+    const rtype = renewal && ["monthly", "fixed", "none"].includes(renewal.type) ? renewal.type : "unknown";
+    const rmonths = renewal && typeof renewal.months === "number" && renewal.months > 0 ? renewal.months : null;
+    const termEnd = addDays(addMonths(startDate, termMonths), -1);
+    const head = `Started ${fmt(startDate)} + ${termMonths} month${termMonths === 1 ? "" : "s"} = ends ${fmt(termEnd)}`;
+    const notes = [];
+    let lead = head;
+
+    if (todayDate <= termEnd) {
+      const by = minusNotice(termEnd);
+      if (rtype === "none") {
+        return { status: "ends", date: iso(termEnd), working: `${head}. The contract looks like it ends by itself, so you may not need to cancel. Check that in the contract.`, notes };
+      }
+      if (by >= todayDate) {
+        if (rtype === "unknown") notes.push("The text does not say what happens after the minimum term. Check it, so you know what a missed date costs you.");
+        return { status: "date", date: iso(by), working: `${head}; notice ${noticeWords(notice)} → cancel by ${fmt(by)}`, notes };
+      }
+      lead = `${head}. The last day to cancel for that date was ${fmt(by)}, and it has passed`;
+    } else {
+      lead = `${head}, and that date has passed`;
+    }
+
+    // After the minimum term (or the first cancel date has been missed): use the renewal rule.
+    if (rtype === "none") {
+      return { status: "ended", date: iso(termEnd), working: `${lead}. The text says the contract does not renew, so it should have ended.`, notes };
+    }
+    if (rtype === "unknown" || (rtype === "fixed" && !rmonths)) {
+      return { status: "missing", missing: [rtype === "fixed" ? "how many months each renewal lasts" : "what happens after the minimum term (monthly or fixed renewal)"], working: "", notes };
+    }
+    let periodEnd, by;
+    if (rtype === "monthly") {
+      periodEnd = eom(todayDate > termEnd ? todayDate : addDays(termEnd, 1));
+      for (let i = 0; i < 600; i++) {
+        by = minusNotice(periodEnd);
+        if (by >= todayDate) break;
+        periodEnd = eom(new Date(periodEnd.getFullYear(), periodEnd.getMonth() + 1, 1));
+      }
+      return { status: "date", date: iso(by), working: `${lead}. After that the contract renews month by month. The next period ends ${fmt(periodEnd)}; notice ${noticeWords(notice)} → cancel by ${fmt(by)}`, notes };
+    }
+    for (let k = 1; k < 600; k++) {
+      periodEnd = addDays(addMonths(startDate, termMonths + k * rmonths), -1);
+      by = minusNotice(periodEnd);
+      if (periodEnd > termEnd && by >= todayDate) break;
+    }
+    return { status: "date", date: iso(by), working: `${lead}. After that it renews every ${rmonths} month${rmonths === 1 ? "" : "s"}. The next period ends ${fmt(periodEnd)}; notice ${noticeWords(notice)} → cancel by ${fmt(by)}`, notes };
+  }
+  // </cancel-by>
+
+  const shift = (days) => { const d = new Date(); d.setDate(d.getDate() + days); return d; };
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const german = (d) => d.toLocaleDateString("de-DE", { day: "numeric", month: "long", year: "numeric" });
+  const english = (d) => d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  const now = new Date();
+  const exStart = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+  const exPriceChange = new Date(exStart.getFullYear(), exStart.getMonth() + 6, 1);
+  const exLetterDate = shift(0);
+  const EXAMPLE_TEXT = `Beispiel Mobil GmbH · Kundenservice · Musterweg 12 · 12345 Musterstadt
+
+Auftragsbestätigung
+Kundennummer: 7730-5521
+Vertragsbeginn: ${german(exStart)}
+
+Tarif: Beispiel Flex 20 GB (Mobilfunk)
+Monatlicher Grundpreis: 19,99 EUR in den ersten 6 Monaten, danach 29,99 EUR (ab ${german(exPriceChange)}).
+Einmaliger Anschlusspreis: 29,99 EUR. SIM-Karte: 9,99 EUR Versandkosten.
+
+Mindestvertragslaufzeit: 24 Monate.
+Kündigungsfrist: 1 Monat zum Ende der Mindestvertragslaufzeit. Nach Ablauf der Mindestvertragslaufzeit verlängert sich der Vertrag auf unbestimmte Zeit und ist monatlich kündbar.
+Kündigung in Textform (E-Mail oder Brief) an kuendigung@beispiel-mobil.example.
+
+Bei Rufnummernmitnahme fällt eine Gebühr von 24,95 EUR an. Die Drosselung auf 1 Mbit/s erfolgt nach Verbrauch des Datenvolumens.`;
+
+  const EXAMPLE_RESULT = {
+    provider: "Beispiel Mobil GmbH",
+    product: "Beispiel Flex 20 GB (mobile phone plan)",
+    kind: "mobile",
+    price_now: "19.99 EUR per month",
+    price_later: "29.99 EUR per month",
+    price_change_date: iso(exPriceChange),
+    one_off_fees: ["Connection fee: 29.99 EUR", "SIM card shipping: 9.99 EUR", "Number transfer (if you move your number away): 24.95 EUR"],
+    start_date: iso(exStart),
+    minimum_term_months: 24,
+    notice: { amount: 1, unit: "months", before: "end_of_term" },
+    renewal: { type: "monthly", months: null },
+    cancel_channel: "In writing (email or letter) to kuendigung@beispiel-mobil.example",
+    unusual: [
+      "The price rises by 10 EUR a month after 6 months. Over 24 months you pay 18 x 29.99 + 6 x 19.99 = 659.76 EUR, not 19.99 x 24.",
+      "Speed drops to 1 Mbit/s when the data is used up.",
+      "A fee of 24.95 EUR applies if you take your number to another provider.",
+    ],
+    questions: [
+      "Is the price after 6 months fixed for the whole term?",
+      "Can I get a cheaper plan after the 6 promotional months without a new minimum term?",
+      "Is the 24.95 EUR number transfer fee the real cost, or can it be lower?",
+    ],
+    letter: {
+      language: "German",
+      text: `[Ihr Name]\n[Ihre Adresse]\n\nBeispiel Mobil GmbH\nKundenservice\nMusterweg 12\n12345 Musterstadt\n\nMusterstadt, ${german(exLetterDate)}\n\nKündigung meines Vertrags, Kundennummer [Kundennummer]\n\nSehr geehrte Damen und Herren,\n\nhiermit kündige ich meinen Vertrag (Tarif Beispiel Flex 20 GB, Rufnummer [Ihre Rufnummer]) fristgerecht zum nächstmöglichen Zeitpunkt.\n\nBitte bestätigen Sie mir die Kündigung und das genaue Vertragsende schriftlich.\n\nMit freundlichen Grüßen\n[Ihr Name]`,
+    },
+    letter_translation: `[Your name]\n[Your address]\n\nBeispiel Mobil GmbH\nCustomer service\nMusterweg 12\n12345 Musterstadt\n\nMusterstadt, ${english(exLetterDate)}\n\nCancellation of my contract, customer number [customer number]\n\nDear Sir or Madam,\n\nI am cancelling my contract (plan Beispiel Flex 20 GB, phone number [your number]) on time, for the earliest possible date.\n\nPlease confirm the cancellation and the exact end date of the contract in writing.\n\nKind regards\n[Your name]`,
+    get_help: "If the provider says the contract cannot be cancelled, or charges you after the end date, ask a consumer advice centre before you pay.",
+  };
+
+  function buildPrompt({ text, country, language, hasPhotos, started }) {
+    const germany = /german|deutsch/i.test(country || "");
+    return [
+      "You help a person understand a consumer contract or bill (phone, internet, energy, gym, streaming, insurance). Be accurate, calm and practical.",
+      `Today's date is ${H.todayISO()}. The contract is from: ${country || "unknown country"}.`,
+      `Write every explanation in ${language}, in short, plain sentences a non-expert can follow.`,
+      "Keep prices, names and quoted terms exactly as written in the contract. Prices are text, with the currency and the period, for example '19.99 EUR per month'.",
+      "Never guess a date, number or rule the document does not state: use null for it, and add a question for the person to ask the provider.",
+      "Do not work out the cancel-by date yourself. The page does it from the dates you extract.",
+      "Dates are written YYYY-MM-DD. Give the minimum term in months (24 months = 24; 2 years = 24).",
+      started ? `The person says the contract started on ${started}. Use that as start_date.` : "",
+      germany ? "Germany: consumer contracts signed from 1 March 2022 usually continue month by month after the minimum term, with at most one month's notice, even if the text says otherwise. Do not assert that this applies. In 'unusual', say 'check' whether the contract's longer renewal or notice terms still apply, and ask the person to check with the provider or a consumer advice centre." : "",
+      "Point out anything unusual or expensive: a price rise, a long automatic renewal, fees for leaving, speed or data limits, a hardware rate that is paid on top.",
+      "",
+      "Reply with only one JSON object in this shape:",
+      `{"provider": "", "product": "", "kind": "mobile|internet|energy|gym|streaming|insurance|other",`,
+      ` "price_now": "", "price_later": "price after a promotion, or empty", "price_change_date": "YYYY-MM-DD or null",`,
+      ` "one_off_fees": [""], "start_date": "YYYY-MM-DD or null", "minimum_term_months": 24,`,
+      ` "notice": {"amount": 1, "unit": "days|weeks|months", "before": "end_of_term|end_of_month|any_time"},`,
+      ` "renewal": {"type": "monthly|fixed|none|unknown", "months": null},`,
+      ` "cancel_channel": "how the contract says you must cancel (email, letter, form, phone)",`,
+      ` "unusual": [""], "questions": ["a question to ask the provider"],`,
+      ` "letter": {"language": "the provider's language", "text": "a short cancellation letter in the provider's language, with [placeholders] for the person's name, address, customer number and phone number, cancelling on time for the earliest possible date and asking for a written confirmation"},`,
+      ` "letter_translation": "the same letter in ${language}",`,
+      ` "get_help": "one sentence on when and where to get real help"}`,
+      "Use null for notice.amount, notice.unit or notice.before if the document does not say. Use empty arrays when there is nothing to list.",
+      "",
+      hasPhotos ? "The contract is in the attached photos." : "The contract:",
+      hasPhotos ? (text ? "Extra text the person added:\n" + text : "") : text,
+    ].filter((line, i, all) => line !== "" || all[i - 1] !== "").join("\n");
+  }
+
+  const KIND = { mobile: "Mobile phone", internet: "Internet", energy: "Energy", gym: "Gym", streaming: "Streaming", insurance: "Insurance", other: "Contract" };
+  const BEFORE = { end_of_term: "before the end of the term", end_of_month: "before the end of a month", any_time: "at any time" };
+
+  function section(title, ...children) {
+    return H.el("section", { class: "sheet" }, H.el("h2", { text: title }), ...children);
+  }
+  const list = (items) => H.el("ul", { class: "plain-list", dir: "auto" }, items.map((t) => H.el("li", { text: t })));
+  const filled = (arr) => Array.isArray(arr) ? arr.map((x) => typeof x === "string" ? x : (x == null ? "" : String(x))).filter((x) => x.trim()) : [];
+  const str = (v) => typeof v === "string" ? v.trim() : "";
+
+  function noticeText(n) {
+    if (!n || typeof n.amount !== "number" || !["days", "weeks", "months"].includes(n.unit)) return "";
+    const unit = n.unit.replace(/s$/, "") + (n.amount === 1 ? "" : "s");
+    return `${n.amount} ${unit}${BEFORE[n.before] ? " " + BEFORE[n.before] : ""}`;
+  }
+  function renewalText(r) {
+    if (!r) return "";
+    if (r.type === "monthly") return "Month by month after the minimum term";
+    if (r.type === "fixed") return typeof r.months === "number" ? `Renews for another ${r.months} month${r.months === 1 ? "" : "s"} each time` : "Renews for a fixed period each time";
+    if (r.type === "none") return "Does not renew";
+    return "";
+  }
+
+  function render(data, { example = false, userStart = "" } = {}) {
+    const out = [];
+    const start = H.parseISO(userStart) ? userStart : (H.parseISO(data.start_date) ? data.start_date : "");
+    const result = computeCancelBy({
+      start,
+      termMonths: typeof data.minimum_term_months === "number" ? data.minimum_term_months : null,
+      notice: data.notice || null,
+      renewal: data.renewal || null,
+      today: H.todayISO(),
+    });
+
+    out.push(H.el("section", { class: "sheet accented" },
+      H.el("div", { class: "tags" },
+        example ? H.el("span", { class: "tag example", text: "Example" }) : null,
+        H.el("span", { class: "tag", text: KIND[data.kind] || KIND.other })),
+      H.el("p", { class: "big-line", dir: "auto", text: [str(data.provider), str(data.product)].filter(Boolean).join(": ") || "Your contract" }),
+      H.el("p", { class: "hint", dir: "auto", text: str(data.price_now) ? `Now: ${str(data.price_now)}` : "Price not stated" })));
+
+    // Cancel-by date, with the working shown.
+    if (result.status === "date" || result.status === "ends" || result.status === "ended") {
+      const children = [];
+      if (result.status === "date") {
+        const days = H.daysUntil(result.date);
+        const remind = H.el("button", { type: "button", class: "btn small", text: "Remind me" });
+        remind.addEventListener("click", async () => {
+          try {
+            const status = await H.saveFile("cancel-reminder.ics",
+              H.ics({ title: `Cancel ${str(data.provider) || "contract"} by today`, date: result.date, remindDaysBefore: 14, description: `${result.working}. Check the date with the provider.` }), "text/calendar");
+            remind.textContent = status === "saved" ? "Saved" : "Sent";
+          } catch { remind.textContent = "Could not save"; }
+        });
+        children.push(
+          H.el("div", { class: "cancel-by" },
+            H.el("span", { class: "when", text: H.longDate(result.date) }),
+            H.el("span", { class: `tag ${days !== null && days <= 14 ? "warn" : "ok"}`, text: H.daysText(days) })),
+          H.el("p", { class: "working", dir: "auto", text: result.working }),
+          H.el("div", { class: "row" }, remind),
+          H.el("p", { class: "hint", text: "The reminder is set for two weeks before this date." }));
+      } else {
+        children.push(H.el("p", { class: "big-line", text: result.status === "ends" ? "No need to cancel, it looks like it ends by itself." : "It should have ended already." }),
+          H.el("p", { class: "working", dir: "auto", text: result.working }));
+      }
+      for (const n of result.notes) children.push(H.el("p", { class: "notice warn", text: n }));
+      children.push(H.el("p", { class: "hint", text: "Worked out by this page from the dates above. Check it with the provider." }));
+      out.push(section("Cancel by", ...children));
+    } else {
+      out.push(section("Cancel by",
+        H.el("p", { text: "We cannot work out the date yet. These are missing:" }),
+        H.el("ul", { class: "missing-list" }, result.missing.map((m) => H.el("li", { text: m }))),
+        H.el("p", { class: "hint", text: "Find it in the contract, or ask the provider. Then add the start date above and press the button again." })));
+    }
+
+    const kv = [];
+    const row = (k, v) => { if (v) kv.push(H.el("dt", { text: k }), H.el("dd", { text: v })); };
+    row("Price now", str(data.price_now));
+    const later = str(data.price_later);
+    if (later) row("Price later", H.parseISO(data.price_change_date) ? `${later} (from ${H.longDate(data.price_change_date)})` : later);
+    row("Started", start ? H.longDate(start) + (H.parseISO(userStart) ? " (your date)" : "") : "");
+    row("Minimum term", typeof data.minimum_term_months === "number" ? `${data.minimum_term_months} month${data.minimum_term_months === 1 ? "" : "s"}` : "");
+    row("Notice period", noticeText(data.notice));
+    row("Renewal", renewalText(data.renewal));
+    row("How to cancel", str(data.cancel_channel));
+    if (kv.length) out.push(section("The terms", H.el("dl", { class: "kv", dir: "auto" }, kv)));
+
+    const fees = filled(data.one_off_fees);
+    if (fees.length) out.push(section("One-off fees", list(fees)));
+    const unusual = filled(data.unusual);
+    if (unusual.length) out.push(section("Watch out for", list(unusual)));
+    const questions = filled(data.questions);
+    if (questions.length) out.push(section("Questions to ask the provider", list(questions)));
+
+    const letter = data.letter && typeof data.letter === "object" ? data.letter : {};
+    const original = str(letter.text);
+    const translation = str(data.letter_translation);
+    if (original || translation) {
+      const block = (label, text) => {
+        const copyButton = H.el("button", { type: "button", class: "btn small", text: "Copy for the cancellation letter" });
+        copyButton.addEventListener("click", () => H.copy(text, copyButton));
+        return H.el("div", {}, H.el("h3", { text: label }), H.el("div", { class: "quote", dir: "auto", text }), H.el("div", { class: "row" }, copyButton));
+      };
+      out.push(section("Cancellation letter",
+        H.el("p", { class: "hint", text: "Fill in the parts in [brackets]." + (str(data.cancel_channel) ? " The contract says to send it like this: " + str(data.cancel_channel) + "." : "") }),
+        H.el("div", { class: "reply-pair" },
+          original ? block(`To send (${str(letter.language) || "provider's language"})`, original) : null,
+          translation ? block("What it says", translation) : null)));
+    }
+    if (str(data.get_help)) out.push(H.el("p", { class: "notice", dir: "auto", text: str(data.get_help) }));
+    $("results").replaceChildren(...out);
+  }
+
+  function setTab(next) {
+    tab = next;
+    for (const b of document.querySelectorAll("[data-tab]")) {
+      const on = b.dataset.tab === next;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-pressed", String(on));
+    }
+    for (const p of document.querySelectorAll("[data-panel]")) p.hidden = p.dataset.panel !== next;
+  }
+  for (const b of document.querySelectorAll("[data-tab]")) b.addEventListener("click", () => setTab(b.dataset.tab));
+
+  function state() {
+    const images = tab === "photo" ? photos.files() : [];
+    const started = H.parseISO($("started").value) ? $("started").value : "";
+    return { text: $("contract").value.trim(), country: $("country").value.trim(), language: getLanguage(), images, hasPhotos: images.length > 0, started };
+  }
+
+  function say(message, kind = "") {
+    $("status").replaceChildren(message ? H.el("p", { class: kind === "thinking" ? "thinking" : `notice ${kind}`, text: message }) : "");
+  }
+
+  async function check() {
+    const s = state();
+    if (!s.text && !s.hasPhotos) { say("Paste the contract or add a photo first.", "warn"); return; }
+    controller?.abort();
+    controller = new AbortController();
+    const go = $("go");
+    go.disabled = true;
+    $("results").setAttribute("aria-busy", "true");
+    say("Reading your contract. This usually takes 10 to 40 seconds.", "thinking");
+    try {
+      const data = await H.askJSON(buildPrompt(s), { images: s.images, signal: controller.signal });
+      if (!data || typeof data !== "object") throw { code: "invalid_json" };
+      render(data, { userStart: s.started });
+      say("");
+      $("results").querySelector("h2, .big-line")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (error) {
+      if (error?.code !== "cancelled") say(H.errorText(error), "danger");
+      if (!(await H.live())) go.textContent = "Copy as prompt";
+    } finally {
+      go.disabled = false;
+      $("results").removeAttribute("aria-busy");
+    }
+  }
+
+  function showPrompt() {
+    const s = state();
+    if (!s.text && !s.hasPhotos) { say("Paste the contract first. Then the prompt includes it.", "warn"); return; }
+    const note = s.hasPhotos
+      ? "This copy of the page cannot reach Claude directly. Copy the prompt, open a new chat on claude.ai, paste it and attach your photos there."
+      : undefined;
+    say("");
+    $("results").replaceChildren(H.promptPanel(buildPrompt(s), note));
+  }
+
+  $("form").addEventListener("submit", (e) => e.preventDefault());
+  H.wireMainButton({ button: $("go"), liveLabel: "Check my contract", onLive: check, onCopy: showPrompt }).then(async (isLive) => {
+    if (!isLive) $("photo-tab").title = "Photos work in the live version on claude.ai";
+    const limits = await H.imageLimits();
+    if (limits) photos.setMax(Math.min(4, limits.maxCount || 4));
+  });
+
+  $("contract").value = EXAMPLE_TEXT;
+  render(EXAMPLE_RESULT, { example: true });
+})();
+</script>
